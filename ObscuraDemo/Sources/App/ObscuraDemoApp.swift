@@ -13,10 +13,7 @@ import Obscura
 struct ObscuraDemoApp: App {
     var body: some Scene {
         WindowGroup {
-            VStack {
-                Text(Foo().bar())
-                Text("Hello from ObscuraDemoApp")
-            }
+            ObscuraView(viewModel: ObscuraViewModel())
         }
     }
 }

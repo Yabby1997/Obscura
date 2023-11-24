@@ -11,22 +11,17 @@ let targets: [Target] = [
         dependencies: []
     ),
     Target(
-        name: "ObscuraTests",
-        platform: .iOS,
-        product: .unitTests,
-        bundleId: "com.seunghun.obscuratests",
-        sources: ["Obscura/Tests/**"],
-        dependencies: [
-            .target(name: "Obscura")
-        ]
-    ),
-    Target(
         name: "ObscuraDemo",
         platform: .iOS,
         product: .app,
         bundleId: "com.seunghun.obscura.demo",
         deploymentTarget: .iOS(targetVersion: "15.0", devices: [.iphone]),
-        infoPlist: .extendingDefault(with: ["UILaunchStoryboardName": "LaunchScreen"]),
+        infoPlist: .extendingDefault(
+            with: [
+                "UILaunchStoryboardName": "LaunchScreen",
+                "NSCameraUsageDescription": "Camera permission is needed for ObscuraDemo",
+            ]
+        ),
         sources: ["ObscuraDemo/Sources/**"],
         resources: ["ObscuraDemo/Resources/**"],
         dependencies: [
