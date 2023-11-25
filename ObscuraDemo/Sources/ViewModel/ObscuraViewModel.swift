@@ -22,7 +22,19 @@ final class ObscuraViewModel: ObservableObject {
     init() {
         obscuraCamera.iso
             .sink { iso in
-                print(iso)
+                print("ISO", iso)
+            }
+            .store(in: &cancellables)
+        
+        obscuraCamera.shutterSpeed
+            .sink { shutterSpeed in
+                print("ShutterSpeed", shutterSpeed)
+            }
+            .store(in: &cancellables)
+        
+        obscuraCamera.aperture
+            .sink { aperture in
+                print("aperture", aperture)
             }
             .store(in: &cancellables)
     }

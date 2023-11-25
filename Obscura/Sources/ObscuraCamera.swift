@@ -23,6 +23,12 @@ public final class ObscuraCamera {
     @Published private var _iso: Float = .zero
     public var iso: AnyPublisher<Float, Never> { $_iso.eraseToAnyPublisher() }
     
+    @Published private var _shutterSpeed: Float = .zero
+    public var shutterSpeed: AnyPublisher<Float, Never> { $_shutterSpeed.eraseToAnyPublisher() }
+    
+    @Published private var _aperture: Float = .zero
+    public var aperture: AnyPublisher<Float, Never> { $_aperture.eraseToAnyPublisher() }
+    
     public init() {
         self._previewLayer = AVCaptureVideoPreviewLayer(session: captureSession)
     }
@@ -35,7 +41,15 @@ public final class ObscuraCamera {
         guard let camera = AVCaptureDevice.default(for: .video) else { return }
         let input = try AVCaptureDeviceInput(device: camera)
         
-        camera.publisher(for: \.iso).assign(to: &$_iso)
+        camera.publisher(for: \.iso)
+            .assign(to: &$_iso)
+        
+        camera.publisher(for: \.exposureDuration)
+            .map { Float($0.seconds) }
+            .assign(to: &$_shutterSpeed)
+        
+        camera.publisher(for: \.lensAperture)
+            .assign(to: &$_aperture)
         
         guard captureSession.canAddInput(input) else { return }
         captureSession.addInput(input)
