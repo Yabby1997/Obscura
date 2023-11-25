@@ -6,6 +6,7 @@
 //  Copyright © 2023 seunghun. All rights reserved.
 //
 
+import Combine
 import Foundation
 import Obscura
 import QuartzCore
@@ -15,6 +16,16 @@ final class ObscuraViewModel: ObservableObject {
     var previewLayer: CALayer { obscuraCamera.previewLayer }
     
     @Published var shouldShowSettings = false
+    
+    private var cancellables: Set<AnyCancellable> = []
+    
+    init() {
+        obscuraCamera.iso
+            .sink { iso in
+                print(iso)
+            }
+            .store(in: &cancellables)
+    }
     
     func onAppear() {
         Task {
