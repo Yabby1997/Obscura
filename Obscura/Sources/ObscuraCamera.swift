@@ -20,6 +20,8 @@ public final class ObscuraCamera {
     private let _previewLayer: AVCaptureVideoPreviewLayer
     public var previewLayer: CALayer { _previewLayer }
     
+    @Published public private(set) var isRunning = false
+    
     @Published private var _iso: Float = .zero
     public var iso: AnyPublisher<Float, Never> { $_iso.eraseToAnyPublisher() }
     
@@ -31,6 +33,9 @@ public final class ObscuraCamera {
     
     public init() {
         self._previewLayer = AVCaptureVideoPreviewLayer(session: captureSession)
+        
+        captureSession.publisher(for: \.isRunning)
+            .assign(to: &$isRunning)
     }
     
     public func setup() async throws {

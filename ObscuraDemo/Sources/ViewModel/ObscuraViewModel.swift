@@ -34,7 +34,8 @@ final class ObscuraViewModel: ObservableObject {
             .assign(to: &$aperture)
     }
     
-    func onAppear() {
+    func setupIfNeeded() {
+        guard !obscuraCamera.isRunning else { return }
         Task {
             do {
                 try await obscuraCamera.setup()

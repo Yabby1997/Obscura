@@ -7,7 +7,6 @@
 //
 
 import SwiftUI
-import Obscura
 
 final class CameraView: UIView {
     private let previewLayer: CALayer
@@ -21,7 +20,7 @@ final class CameraView: UIView {
     required init?(coder: NSCoder) {
         fatalError("init(coder:) has not been implemented")
     }
-    
+
     override func layoutSubviews() {
         super.layoutSubviews()
         previewLayer.frame = layer.bounds
@@ -29,14 +28,14 @@ final class CameraView: UIView {
 }
 
 struct CameraViewRepresentable: UIViewRepresentable {
-    private let view: CameraView
+    private let previewLayer: CALayer
 
     init(previewLayer: CALayer) {
-        self.view = CameraView(previewLayer: previewLayer)
+        self.previewLayer = previewLayer
     }
     
     func makeUIView(context: Context) -> some UIView {
-        view
+        CameraView(previewLayer: previewLayer)
     }
     
     func updateUIView(_ uiView: UIViewType, context: Context) {}
