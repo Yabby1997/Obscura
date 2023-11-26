@@ -16,27 +16,22 @@ final class ObscuraViewModel: ObservableObject {
     var previewLayer: CALayer { obscuraCamera.previewLayer }
     
     @Published var shouldShowSettings = false
-    
-    private var cancellables: Set<AnyCancellable> = []
+    @Published var iso: Float = .zero
+    @Published var shutterSpeed: Float = .zero
+    @Published var aperture: Float = .zero
     
     init() {
         obscuraCamera.iso
-            .sink { iso in
-                print("ISO", iso)
-            }
-            .store(in: &cancellables)
+            .receive(on: DispatchQueue.main)
+            .assign(to: &$iso)
         
         obscuraCamera.shutterSpeed
-            .sink { shutterSpeed in
-                print("ShutterSpeed", shutterSpeed)
-            }
-            .store(in: &cancellables)
+            .receive(on: DispatchQueue.main)
+            .assign(to: &$shutterSpeed)
         
         obscuraCamera.aperture
-            .sink { aperture in
-                print("aperture", aperture)
-            }
-            .store(in: &cancellables)
+            .receive(on: DispatchQueue.main)
+            .assign(to: &$aperture)
     }
     
     func onAppear() {

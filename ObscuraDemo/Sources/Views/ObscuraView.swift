@@ -15,6 +15,23 @@ struct ObscuraView: View {
         ZStack {
             CameraViewRepresentable(previewLayer: viewModel.previewLayer)
                 .ignoresSafeArea()
+            VStack {
+                HStack {
+                    ResultView(
+                        title: "ISO",
+                        value: "\(Int(viewModel.iso))"
+                    )
+                    ResultView(
+                        title: "Shutter",
+                        value: String(format: "%.3fs", viewModel.shutterSpeed)
+                    )
+                    ResultView(
+                        title: "Aperture",
+                        value: String(format: "ƒ%.1f", viewModel.aperture)
+                    )
+                }
+                Spacer()
+            }
         }
         .onAppear {
             viewModel.onAppear()
