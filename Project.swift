@@ -6,7 +6,7 @@ let targets: [Target] = [
         platform: .iOS,
         product: .framework,
         bundleId: "com.seunghun.obscura",
-        deploymentTarget: .iOS(targetVersion: "15.0", devices: [.iphone]),
+        deploymentTarget: .iOS(targetVersion: "16.0", devices: [.iphone]),
         sources: ["Obscura/Sources/**"],
         dependencies: []
     ),
@@ -15,7 +15,7 @@ let targets: [Target] = [
         platform: .iOS,
         product: .app,
         bundleId: "com.seunghun.obscura.demo",
-        deploymentTarget: .iOS(targetVersion: "15.0", devices: [.iphone]),
+        deploymentTarget: .iOS(targetVersion: "16.0", devices: [.iphone]),
         infoPlist: .extendingDefault(
             with: [
                 "UILaunchStoryboardName": "LaunchScreen",

@@ -17,6 +17,16 @@ struct ObscuraView: View {
         ZStack {
             CameraViewRepresentable(previewLayer: viewModel.previewLayer)
                 .ignoresSafeArea()
+                .onTapGesture(coordinateSpace: .local) { point in
+                    viewModel.didTap(point: point)
+                }
+            if let focusingPoint = viewModel.focusingPoint {
+                Rectangle()
+                    .frame(width: 40, height: 40)
+                    .foregroundStyle(.clear)
+                    .border(viewModel.isFocused ? .green : .red, width: 5)
+                    .position(focusingPoint)
+            }
             VStack {
                 HStack {
                     ResultView(
