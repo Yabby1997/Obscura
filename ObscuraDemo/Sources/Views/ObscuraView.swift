@@ -43,6 +43,14 @@ struct ObscuraView: View {
                     )
                 }
                 Spacer()
+                Button {
+                    viewModel.didTapUnlock()
+                } label: {
+                    Text("AE-L\nAF-L")
+                }
+                .font(.system(size: 18, weight: .bold))
+                .foregroundStyle(viewModel.isAELMode ? .red : .white)
+                .shadow(radius: 5)
             }
         }
         .onChange(of: scenePhase) { phase in
