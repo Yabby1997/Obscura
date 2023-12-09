@@ -7,80 +7,70 @@
 //
 
 import Combine
-import Foundation
 import AVFoundation
 
+/// A class that wraps `AVCaptureDevice` and `AVCaptureSession` to provide a convenient interface for camera operations.
 public final class ObscuraCamera {
-    public enum ExposureFocusLockStatus {
-        case idle
-        case seeking(point: CGPoint)
-        case locked(point: CGPoint)
-    }
-    
+    /// Errors that can occur while using ``ObscuraCamera``.
     public enum Errors: Error {
+        /// Indicates that camera access is not authorized.
         case notAuthorized
     }
     
-    private var captureSession = AVCaptureSession()
+    // MARK: - Dependencies
+    
     private var camera: AVCaptureDevice?
+    private var captureSession = AVCaptureSession()
+    
+    // MARK: - Private Properties
     
     private let _previewLayer: AVCaptureVideoPreviewLayer
-    public var previewLayer: CALayer { _previewLayer }
-    
-    @Published public private(set) var isRunning = false
-    
     @Published private var _iso: Float = .zero
-    public var iso: AnyPublisher<Float, Never> { $_iso.eraseToAnyPublisher() }
-    
     @Published private var _shutterSpeed: Float = .zero
-    public var shutterSpeed: AnyPublisher<Float, Never> { $_shutterSpeed.eraseToAnyPublisher() }
-    
     @Published private var _aperture: Float = .zero
+    @Published private var _exposureLockPoint: CGPoint?
+    @Published private var _focusLockPoint: CGPoint?
+    @Published private var _isExposureLocked: Bool = false
+    @Published private var _isFocusLocked: Bool = false
+    
+    // MARK: - Public Properties
+    
+    /// A `Bool` value indicating whether the camera is running.
+    @Published private(set) public var isRunning = false
+    /// The layer that camera feed will be rendered on.
+    public var previewLayer: CALayer { _previewLayer }
+    /// The ISO value that the camera is currently using.
+    public var iso: AnyPublisher<Float, Never> { $_iso.eraseToAnyPublisher() }
+    /// The Shutter speed value that the camera is currently using.
+    public var shutterSpeed: AnyPublisher<Float, Never> { $_shutterSpeed.eraseToAnyPublisher() }
+    /// The Aperture f-number value that the camera is currently using.
     public var aperture: AnyPublisher<Float, Never> { $_aperture.eraseToAnyPublisher() }
+    /// A `CGPoint` value indicating which point is being used for exposure lock.
+    public var exposureLockPoint: AnyPublisher<CGPoint?, Never> { $_exposureLockPoint.eraseToAnyPublisher() }
+    /// A `CGPoint` value indicating which point is being used for focus lock.
+    public var focusLockPoint: AnyPublisher<CGPoint?, Never> { $_focusLockPoint.eraseToAnyPublisher() }
+    /// A `Bool` value indicating whether the exposure is locked.
+    public var isExposureLocked: AnyPublisher<Bool, Never> { $_isExposureLocked.eraseToAnyPublisher() }
+    /// A `Bool` value indicating whether the focus is locked.
+    public var isFocusLocked: AnyPublisher<Bool, Never> { $_isFocusLocked.eraseToAnyPublisher() }
     
-    private var tempPointOfInterest: CGPoint?
-    private var tempExposureFocusLockStatus: ExposureFocusLockStatus?
-    @Published private var _exposureFocusLockStatus: ExposureFocusLockStatus = .idle
-    public var exposureFocusLockStatus: AnyPublisher<ExposureFocusLockStatus, Never> {
-        $_exposureFocusLockStatus.eraseToAnyPublisher()
-    }
-    
-    @Published private var _isExposureFocusLockMode: Bool = false
-    public var isExposureFocusLockMode: AnyPublisher<Bool, Never> {
-        $_isExposureFocusLockMode.eraseToAnyPublisher()
-    }
-    
-    private var cancellables: Set<AnyCancellable> = []
-    
-    public init(feedbackProvidable: ObscuraCameraFeedbackProvidable? = nil) {
+    // MARK: - Initializers
+
+    /// Creates an ``ObscuraCamera`` instance.
+    ///
+    /// - Important: Ensure to call ``setup()`` before utilizing the camera features.
+    public init() {
         self._previewLayer = AVCaptureVideoPreviewLayer(session: captureSession)
-        
+
         captureSession.publisher(for: \.isRunning)
             .assign(to: &$isRunning)
-        
-        $_exposureFocusLockStatus
-            .sink { status in
-                guard case .locked = status else { return }
-                feedbackProvidable?.generateExposureFocusLockFeedback()
-            }
-            .store(in: &cancellables)
-        
-        $_exposureFocusLockStatus
-            .map { [weak self] status -> ExposureFocusLockStatus in
-                self?.tempExposureFocusLockStatus = status
-                return status
-            }
-            .debounce(for: .seconds(1), scheduler: DispatchQueue.main)
-            .sink { [weak self] status in
-                guard case let .locked(point) = status,
-                      case let .locked(tempPoint) = self?.tempExposureFocusLockStatus,
-                      point == tempPoint else { return }
-                self?.tempPointOfInterest = nil
-                self?._exposureFocusLockStatus = .idle
-            }
-            .store(in: &cancellables)
     }
     
+    // MARK: - Public Methods
+
+    /// Sets up the camera.
+    ///
+    /// - Throws: Errors that occurred while configuring camera including authorization error.
     public func setup() async throws {
         guard await AVCaptureDevice.requestAccess(for: .video) else {
             throw Errors.notAuthorized
@@ -99,22 +89,29 @@ public final class ObscuraCamera {
         camera.publisher(for: \.lensAperture)
             .assign(to: &$_aperture)
         
-        Publishers.CombineLatest4(
-            camera.publisher(for: \.isAdjustingFocus),
-            camera.publisher(for: \.isAdjustingExposure),
-            camera.publisher(for: \.focusPointOfInterest),
-            camera.publisher(for: \.exposurePointOfInterest)
-        )
-        .compactMap { [weak self] isAdjustingFocus, isAdjustingExposure, focusPointOfInterest, exposurePointOfInterest in
-            guard let self, tempPointOfInterest == focusPointOfInterest else {
-                return nil
+        camera.publisher(for: \.exposureMode)
+            .map { $0 == .locked }
+            .assign(to: &$_isExposureLocked)
+        
+        camera.publisher(for: \.focusMode)
+            .map { $0 == .locked }
+            .assign(to: &$_isFocusLocked)
+        
+        camera.publisher(for: \.exposurePointOfInterest)
+            .dropFirst()
+            .compactMap { [weak self] pointOfInterest in
+                guard let point = self?._previewLayer.layerPointConverted(fromCaptureDevicePoint: pointOfInterest) else { return nil }
+                return point
             }
-            let pointOfInterest = _previewLayer.layerPointConverted(fromCaptureDevicePoint: focusPointOfInterest)
-            return (!isAdjustingFocus && !isAdjustingExposure && focusPointOfInterest == exposurePointOfInterest)
-                ? .locked(point: pointOfInterest)
-                : .seeking(point: pointOfInterest)
-        }
-        .assign(to: &$_exposureFocusLockStatus)
+            .assign(to: &$_exposureLockPoint)
+        
+        camera.publisher(for: \.focusPointOfInterest)
+            .dropFirst()
+            .compactMap { [weak self] pointOfInterest in
+                guard let point = self?._previewLayer.layerPointConverted(fromCaptureDevicePoint: pointOfInterest) else { return nil }
+                return point
+            }
+            .assign(to: &$_focusLockPoint)
         
         guard captureSession.canAddInput(input) else { return }
         captureSession.addInput(input)
@@ -126,36 +123,57 @@ public final class ObscuraCamera {
         captureSession.startRunning()
     }
     
-    public func lockExposureAndFocus(on point: CGPoint) throws {
-        guard let camera,
-              camera.isFocusPointOfInterestSupported,
-              camera.isExposurePointOfInterestSupported else { return }
-
+    /// Locks the exposure on certain point.
+    ///
+    /// - Note: Unlock the exposure using ``unlockExposure()``
+    ///
+    /// - Parameters:
+    ///     - point: The certain point on `previewLayer` to lock exposure.
+    public func lockExposure(on point: CGPoint) throws {
+        guard let camera, camera.isExposurePointOfInterestSupported else { return }
+        _exposureLockPoint = nil
+        try camera.lockForConfiguration()
+        let pointOfInterest = _previewLayer.captureDevicePointConverted(fromLayerPoint: point)
+        camera.exposurePointOfInterest = pointOfInterest
+        camera.exposureMode = .autoExpose
+        camera.unlockForConfiguration()
+    }
+    
+    /// Unlocks the exposure.
+    public func unlockExposure() throws {
+        guard let camera, camera.isExposurePointOfInterestSupported else { return }
+        try camera.lockForConfiguration()
+        let pointOfInterest = CGPoint(x: 0.5, y: 0.5)
+        camera.exposurePointOfInterest = pointOfInterest
+        camera.exposureMode = .continuousAutoExposure
+        camera.unlockForConfiguration()
+        _exposureLockPoint = nil
+    }
+    
+    /// Locks the focus on certain point.
+    ///
+    /// - Note: Unlock the focus using ``unlockFocus()``
+    ///
+    /// - Parameters:
+    ///     - point: The certain point on `previewLayer` to lock focus.
+    public func lockFocus(on point: CGPoint) throws {
+        guard let camera, camera.isFocusPointOfInterestSupported else { return }
+        _focusLockPoint = nil
         try camera.lockForConfiguration()
         let pointOfInterest = _previewLayer.captureDevicePointConverted(fromLayerPoint: point)
         camera.focusPointOfInterest = pointOfInterest
-        camera.exposurePointOfInterest = pointOfInterest
         camera.focusMode = .autoFocus
-        camera.exposureMode = .autoExpose
         camera.unlockForConfiguration()
-        tempPointOfInterest = pointOfInterest
-        _isExposureFocusLockMode = true
     }
     
-    public func unlockExposureAndFocus() throws {
-        guard let camera,
-              camera.isFocusPointOfInterestSupported,
-              camera.isExposurePointOfInterestSupported else { return }
-
-        try? camera.lockForConfiguration()
+    /// Unlocks the focus.
+    public func unlockFocus() throws {
+        guard let camera, camera.isFocusPointOfInterestSupported else { return }
+        try camera.lockForConfiguration()
         let pointOfInterest = CGPoint(x: 0.5, y: 0.5)
         camera.focusPointOfInterest = pointOfInterest
-        camera.exposurePointOfInterest = pointOfInterest
         camera.focusMode = .continuousAutoFocus
-        camera.exposureMode = .continuousAutoExposure
         camera.unlockForConfiguration()
-        tempPointOfInterest = nil
-        _exposureFocusLockStatus = .idle
-        _isExposureFocusLockMode = false
+        _focusLockPoint = nil
     }
 }
