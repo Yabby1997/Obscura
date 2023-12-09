@@ -1,8 +1,8 @@
 //
-//  ObscuraViewModel.swift
-//  Obscura
+//  AFLDemoViewModel.swift
+//  ObscuraDemo
 //
-//  Created by Seunghun on 11/24/23.
+//  Created by Seunghun on 12/9/23.
 //  Copyright © 2023 seunghun. All rights reserved.
 //
 
@@ -10,9 +10,8 @@ import Combine
 import Foundation
 import Obscura
 import QuartzCore
-import AVFoundation
 
-final class ObscuraViewModel: ObservableObject {
+final class AFLDemoViewModel: ObscuraViewModelProtocol {
     private let obscuraCamera = ObscuraCamera()
     var previewLayer: CALayer { obscuraCamera.previewLayer }
     
@@ -20,9 +19,8 @@ final class ObscuraViewModel: ObservableObject {
     @Published var iso: Float = .zero
     @Published var shutterSpeed: Float = .zero
     @Published var aperture: Float = .zero
-    @Published var focusingPoint: CGPoint? = nil
-    @Published var isFocused = false
-    @Published var isAELMode = false
+    @Published var lockPoint: CGPoint? = nil
+    @Published var isLocked = false
     
     init() {
         obscuraCamera.iso
@@ -37,31 +35,20 @@ final class ObscuraViewModel: ObservableObject {
             .receive(on: DispatchQueue.main)
             .assign(to: &$aperture)
         
-        obscuraCamera.exposureFocusLockStatus
-            .map { status in
-                switch status {
-                case .idle: 
-                    return nil
-                case let .locked(point), let .seeking(point):
-                    return point
-                }
-            }
+        obscuraCamera.focusLockPoint
             .receive(on: DispatchQueue.main)
-            .assign(to: &$focusingPoint)
+            .assign(to: &$lockPoint)
         
-        obscuraCamera.exposureFocusLockStatus
-            .map { status in
-                switch status {
-                case .locked: return true
-                case .seeking, .idle: return false
-                }
-            }
+        obscuraCamera.isFocusLocked
             .receive(on: DispatchQueue.main)
-            .assign(to: &$isFocused)
+            .assign(to: &$isLocked)
         
-        obscuraCamera.isExposureFocusLockMode
+        obscuraCamera.isFocusLocked
+            .debounce(for: .seconds(1.5), scheduler: DispatchQueue.main)
+            .filter { $0 }
+            .map { _ in nil }
             .receive(on: DispatchQueue.main)
-            .assign(to: &$isAELMode)
+            .assign(to: &$lockPoint)
     }
     
     func setupIfNeeded() {
@@ -80,10 +67,10 @@ final class ObscuraViewModel: ObservableObject {
     }
     
     func didTapUnlock() {
-        try? obscuraCamera.unlockExposureAndFocus()
+        try? obscuraCamera.unlockFocus()
     }
     
     func didTap(point: CGPoint) {
-        try? obscuraCamera.lockExposureAndFocus(on: point)
+        try? obscuraCamera.lockFocus(on: point)
     }
 }

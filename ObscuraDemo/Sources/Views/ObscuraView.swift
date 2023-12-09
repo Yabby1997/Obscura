@@ -8,8 +8,8 @@
 
 import SwiftUI
 
-struct ObscuraView: View {
-    @StateObject var viewModel: ObscuraViewModel
+struct ObscuraView<ViewModel>: View where ViewModel: ObscuraViewModelProtocol {
+    @StateObject var viewModel: ViewModel
     @Environment(\.openURL) var openURL
     @Environment(\.scenePhase) var scenePhase
 
@@ -20,39 +20,43 @@ struct ObscuraView: View {
                 .onTapGesture(coordinateSpace: .local) { point in
                     viewModel.didTap(point: point)
                 }
-            if let focusingPoint = viewModel.focusingPoint {
+            if let point = viewModel.lockPoint {
                 Rectangle()
                     .frame(width: 40, height: 40)
                     .foregroundStyle(.clear)
-                    .border(viewModel.isFocused ? .green : .red, width: 5)
-                    .position(focusingPoint)
+                    .border(viewModel.isLocked ? .green : .red, width: 5)
+                    .position(point)
             }
+            HStack {
+                ResultView(
+                    title: "ISO",
+                    value: "\(Int(viewModel.iso))"
+                )
+                ResultView(
+                    title: "Shutter",
+                    value: String(format: "%.3fs", viewModel.shutterSpeed)
+                )
+                ResultView(
+                    title: "Aperture",
+                    value: String(format: "ƒ%.1f", viewModel.aperture)
+                )
+            }
+            .allowsHitTesting(false)
             VStack {
-                HStack {
-                    ResultView(
-                        title: "ISO",
-                        value: "\(Int(viewModel.iso))"
-                    )
-                    ResultView(
-                        title: "Shutter",
-                        value: String(format: "%.3fs", viewModel.shutterSpeed)
-                    )
-                    ResultView(
-                        title: "Aperture",
-                        value: String(format: "ƒ%.1f", viewModel.aperture)
-                    )
-                }
                 Spacer()
-                Button {
-                    viewModel.didTapUnlock()
-                } label: {
-                    Text("AE-L\nAF-L")
+                if viewModel.isLocked {
+                    Button {
+                        viewModel.didTapUnlock()
+                    } label: {
+                        Text("Unlock")
+                    }
+                    .foregroundStyle(.yellow)
+                    .font(.system(size: 18, weight: .bold))
+                    .shadow(radius: 5)
                 }
-                .font(.system(size: 18, weight: .bold))
-                .foregroundStyle(viewModel.isAELMode ? .red : .white)
-                .shadow(radius: 5)
             }
         }
+        .onAppear { viewModel.setupIfNeeded() }
         .onChange(of: scenePhase) { phase in
             guard phase == .active else { return }
             viewModel.setupIfNeeded()
@@ -73,5 +77,5 @@ struct ObscuraView: View {
 }
 
 #Preview {
-    ObscuraView(viewModel: ObscuraViewModel())
+    ObscuraView(viewModel: AELDemoViewModel())
 }

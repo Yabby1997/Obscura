@@ -13,7 +13,14 @@ import Obscura
 struct ObscuraDemoApp: App {
     var body: some Scene {
         WindowGroup {
-            ObscuraView(viewModel: ObscuraViewModel())
+            NavigationView {
+                List {
+                    NavigationLink("Auto Exposure Lock") { ObscuraView(viewModel: AELDemoViewModel()) }
+                    NavigationLink("Auto Focus Lock") { ObscuraView(viewModel: AFLDemoViewModel()) }
+                    NavigationLink("AEL + AFL") { ObscuraView(viewModel: AELAFLDemoViewModel()) }
+                }
+                .navigationTitle("Obscura Demo")
+            }
         }
     }
 }
