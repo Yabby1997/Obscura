@@ -61,7 +61,7 @@ public final class ObscuraCamera {
     /// - Important: Ensure to call ``setup()`` before utilizing the camera features.
     public init() {
         self._previewLayer = AVCaptureVideoPreviewLayer(session: captureSession)
-
+        
         captureSession.publisher(for: \.isRunning)
             .assign(to: &$isRunning)
     }
@@ -116,7 +116,10 @@ public final class ObscuraCamera {
         guard captureSession.canAddInput(input) else { return }
         captureSession.addInput(input)
         self.camera = camera
-            
+
+        guard captureSession.canSetSessionPreset(.photo) else { return }
+        captureSession.sessionPreset = .photo
+
         _previewLayer.videoGravity = .resizeAspectFill
         _previewLayer.connection?.videoOrientation = .portrait
         
