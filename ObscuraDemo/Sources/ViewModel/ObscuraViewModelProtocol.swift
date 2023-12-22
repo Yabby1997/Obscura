@@ -17,8 +17,10 @@ protocol ObscuraViewModelProtocol: ObservableObject {
     var aperture: Float { get set }
     var lockPoint: CGPoint? { get set }
     var isLocked: Bool { get set }
+    var isHDREnabled: Bool { get set }
     
     func setupIfNeeded()
     func didTapUnlock()
     func didTap(point: CGPoint)
+    func setHDRMode(isEnabled: Bool)
 }

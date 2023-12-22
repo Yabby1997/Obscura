@@ -54,6 +54,18 @@ struct ObscuraView<ViewModel>: View where ViewModel: ObscuraViewModelProtocol {
                     .font(.system(size: 18, weight: .bold))
                     .shadow(radius: 5)
                 }
+                HStack {
+                    Text("HDR")
+                        .foregroundStyle(.yellow)
+                        .font(.system(size: 18, weight: .bold))
+                        .shadow(radius: 5)
+                    Toggle(isOn: Binding {
+                        viewModel.isHDREnabled
+                    } set: { newValue in
+                        viewModel.setHDRMode(isEnabled: newValue)
+                    }) {}
+                        .labelsHidden()
+                }
             }
         }
         .onAppear { viewModel.setupIfNeeded() }

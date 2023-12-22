@@ -21,6 +21,7 @@ final class AFLDemoViewModel: ObscuraViewModelProtocol {
     @Published var aperture: Float = .zero
     @Published var lockPoint: CGPoint? = nil
     @Published var isLocked = false
+    @Published var isHDREnabled = false
     
     init() {
         obscuraCamera.iso
@@ -49,6 +50,10 @@ final class AFLDemoViewModel: ObscuraViewModelProtocol {
             .map { _ in nil }
             .receive(on: DispatchQueue.main)
             .assign(to: &$lockPoint)
+        
+        obscuraCamera.isHDREnabled
+            .receive(on: DispatchQueue.main)
+            .assign(to: &$isHDREnabled)
     }
     
     func setupIfNeeded() {
@@ -64,6 +69,10 @@ final class AFLDemoViewModel: ObscuraViewModelProtocol {
                 }
             }
         }
+    }
+    
+    func setHDRMode(isEnabled: Bool) {
+        try? obscuraCamera.setHDRMode(isEnabled: isEnabled)
     }
     
     func didTapUnlock() {

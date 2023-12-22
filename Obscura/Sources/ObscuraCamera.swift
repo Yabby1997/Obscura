@@ -25,6 +25,7 @@ public final class ObscuraCamera {
     // MARK: - Private Properties
     
     private let _previewLayer: AVCaptureVideoPreviewLayer
+    @Published private var _isHDREnabled = false
     @Published private var _iso: Float = .zero
     @Published private var _shutterSpeed: Float = .zero
     @Published private var _aperture: Float = .zero
@@ -39,6 +40,8 @@ public final class ObscuraCamera {
     @Published private(set) public var isRunning = false
     /// The layer that camera feed will be rendered on.
     public var previewLayer: CALayer { _previewLayer }
+    /// A `Bool` value indicating whether the HDR mode is enabled.
+    public var isHDREnabled: AnyPublisher<Bool, Never> { $_isHDREnabled.eraseToAnyPublisher() }
     /// The ISO value that the camera is currently using.
     public var iso: AnyPublisher<Float, Never> { $_iso.eraseToAnyPublisher() }
     /// The Shutter speed value that the camera is currently using.
@@ -79,6 +82,9 @@ public final class ObscuraCamera {
         guard let camera = AVCaptureDevice.default(for: .video) else { return }
         let input = try AVCaptureDeviceInput(device: camera)
         
+        camera.publisher(for: \.isVideoHDREnabled)
+            .assign(to: &$_isHDREnabled)
+
         camera.publisher(for: \.iso)
             .assign(to: &$_iso)
         
@@ -124,6 +130,19 @@ public final class ObscuraCamera {
         _previewLayer.connection?.videoOrientation = .portrait
         
         captureSession.startRunning()
+    }
+    
+    /// Sets the HDR mode.
+    ///
+    /// - Note: Subscribe ``isHDREnabled`` to receive update of HDR mode.
+    ///
+    /// - Parameters:
+    ///     - isEnabled: Whether or not to enable the HDR mode.
+    public func setHDRMode(isEnabled: Bool) throws {
+        try camera?.lockForConfiguration()
+        camera?.automaticallyAdjustsVideoHDREnabled = false
+        camera?.isVideoHDREnabled = isEnabled
+        camera?.unlockForConfiguration()
     }
     
     /// Locks the exposure on certain point.
