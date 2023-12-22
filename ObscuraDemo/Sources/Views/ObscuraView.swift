@@ -55,6 +55,22 @@ struct ObscuraView<ViewModel>: View where ViewModel: ObscuraViewModelProtocol {
                     .shadow(radius: 5)
                 }
                 HStack {
+                    Text("Zoom")
+                        .foregroundStyle(.yellow)
+                        .font(.system(size: 18, weight: .bold))
+                        .shadow(radius: 5)
+                    Slider(
+                        value: .init {
+                            viewModel.zoomFactor
+                        } set: { newValue in
+                            viewModel.zoom(factor: newValue)
+                        },
+                        in: 1...viewModel.maxZoomFactor
+                    ) {}
+                        .labelsHidden()
+                }
+                .padding(.horizontal)
+                HStack {
                     Text("HDR")
                         .foregroundStyle(.yellow)
                         .font(.system(size: 18, weight: .bold))

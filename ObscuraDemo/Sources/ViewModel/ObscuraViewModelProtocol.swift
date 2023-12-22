@@ -18,9 +18,12 @@ protocol ObscuraViewModelProtocol: ObservableObject {
     var lockPoint: CGPoint? { get set }
     var isLocked: Bool { get set }
     var isHDREnabled: Bool { get set }
+    var zoomFactor: CGFloat { get set }
+    var maxZoomFactor: CGFloat { get }
     
     func setupIfNeeded()
     func didTapUnlock()
     func didTap(point: CGPoint)
     func setHDRMode(isEnabled: Bool)
+    func zoom(factor: CGFloat)
 }

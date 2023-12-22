@@ -23,6 +23,8 @@ final class AELDemoViewModel: ObscuraViewModelProtocol {
     @Published var isLocked = false
     @Published var isLockMode = false
     @Published var isHDREnabled = false
+    @Published var zoomFactor: CGFloat = 1.0
+    var maxZoomFactor: CGFloat { obscuraCamera.maxZoomFactor }
     
     init() {
         obscuraCamera.iso
@@ -55,6 +57,10 @@ final class AELDemoViewModel: ObscuraViewModelProtocol {
         obscuraCamera.isHDREnabled
             .receive(on: DispatchQueue.main)
             .assign(to: &$isHDREnabled)
+        
+        obscuraCamera.zoomFactor
+            .receive(on: DispatchQueue.main)
+            .assign(to: &$zoomFactor)
     }
     
     func setupIfNeeded() {
@@ -82,5 +88,9 @@ final class AELDemoViewModel: ObscuraViewModelProtocol {
     
     func didTap(point: CGPoint) {
         try? obscuraCamera.lockExposure(on: point)
+    }
+    
+    func zoom(factor: CGFloat) {
+        try? obscuraCamera.zoom(factor: factor)
     }
 }

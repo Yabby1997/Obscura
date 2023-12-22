@@ -33,11 +33,14 @@ public final class ObscuraCamera {
     @Published private var _focusLockPoint: CGPoint?
     @Published private var _isExposureLocked: Bool = false
     @Published private var _isFocusLocked: Bool = false
+    @Published private var _zoomFactor: CGFloat = 1
     
     // MARK: - Public Properties
     
     /// A `Bool` value indicating whether the camera is running.
     @Published private(set) public var isRunning = false
+    /// A `CGFloat` value indicating the maximum zoom factor.
+    @Published private(set) public var maxZoomFactor: CGFloat = .infinity
     /// The layer that camera feed will be rendered on.
     public var previewLayer: CALayer { _previewLayer }
     /// A `Bool` value indicating whether the HDR mode is enabled.
@@ -56,6 +59,9 @@ public final class ObscuraCamera {
     public var isExposureLocked: AnyPublisher<Bool, Never> { $_isExposureLocked.eraseToAnyPublisher() }
     /// A `Bool` value indicating whether the focus is locked.
     public var isFocusLocked: AnyPublisher<Bool, Never> { $_isFocusLocked.eraseToAnyPublisher() }
+    /// A `CGFloat` value indicating the current zoom factor.
+    public var zoomFactor: AnyPublisher<CGFloat, Never> { $_zoomFactor.eraseToAnyPublisher() }
+    
     
     // MARK: - Initializers
 
@@ -84,6 +90,12 @@ public final class ObscuraCamera {
         
         camera.publisher(for: \.isVideoHDREnabled)
             .assign(to: &$_isHDREnabled)
+        
+        camera.publisher(for: \.maxAvailableVideoZoomFactor)
+            .assign(to: &$maxZoomFactor)
+
+        camera.publisher(for: \.videoZoomFactor)
+            .assign(to: &$_zoomFactor)
 
         camera.publisher(for: \.iso)
             .assign(to: &$_iso)
@@ -130,6 +142,16 @@ public final class ObscuraCamera {
         _previewLayer.connection?.videoOrientation = .portrait
         
         captureSession.startRunning()
+    }
+    
+    /// Sets the zoom factor.
+    ///
+    /// - Parameters:
+    ///     - factor: The zoom factor.
+    public func zoom(factor: CGFloat) throws {
+        try camera?.lockForConfiguration()
+        camera?.ramp(toVideoZoomFactor: min(factor, maxZoomFactor), withRate: 30)
+        camera?.unlockForConfiguration()
     }
     
     /// Sets the HDR mode.
