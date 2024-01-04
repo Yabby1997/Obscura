@@ -15,6 +15,10 @@ public final class ObscuraCamera {
     public enum Errors: Error {
         /// Indicates that camera access is not authorized.
         case notAuthorized
+        /// Indicates that setup is not done properly.
+        case setupRequired
+        /// Indicates that the action requested is not supported.
+        case notSupported
     }
     
     // MARK: - Dependencies
@@ -149,9 +153,10 @@ public final class ObscuraCamera {
     /// - Parameters:
     ///     - factor: The zoom factor.
     public func zoom(factor: CGFloat) throws {
-        try camera?.lockForConfiguration()
-        camera?.ramp(toVideoZoomFactor: min(factor, maxZoomFactor), withRate: 30)
-        camera?.unlockForConfiguration()
+        guard let camera else { throw Errors.setupRequired }
+        try camera.lockForConfiguration()
+        camera.ramp(toVideoZoomFactor: min(factor, maxZoomFactor), withRate: 30)
+        camera.unlockForConfiguration()
     }
     
     /// Sets the HDR mode.
@@ -161,10 +166,12 @@ public final class ObscuraCamera {
     /// - Parameters:
     ///     - isEnabled: Whether or not to enable the HDR mode.
     public func setHDRMode(isEnabled: Bool) throws {
-        try camera?.lockForConfiguration()
-        camera?.automaticallyAdjustsVideoHDREnabled = false
-        camera?.isVideoHDREnabled = isEnabled
-        camera?.unlockForConfiguration()
+        guard let camera else { throw Errors.setupRequired }
+        guard camera.activeFormat.isVideoHDRSupported else { throw Errors.notSupported }
+        try camera.lockForConfiguration()
+        camera.automaticallyAdjustsVideoHDREnabled = false
+        camera.isVideoHDREnabled = isEnabled
+        camera.unlockForConfiguration()
     }
     
     /// Locks the exposure on certain point.
@@ -174,7 +181,8 @@ public final class ObscuraCamera {
     /// - Parameters:
     ///     - point: The certain point on `previewLayer` to lock exposure.
     public func lockExposure(on point: CGPoint) throws {
-        guard let camera, camera.isExposurePointOfInterestSupported else { return }
+        guard let camera else { throw Errors.setupRequired }
+        guard camera.isExposurePointOfInterestSupported else { throw Errors.notSupported }
         _exposureLockPoint = nil
         try camera.lockForConfiguration()
         let pointOfInterest = _previewLayer.captureDevicePointConverted(fromLayerPoint: point)
@@ -185,7 +193,8 @@ public final class ObscuraCamera {
     
     /// Unlocks the exposure.
     public func unlockExposure() throws {
-        guard let camera, camera.isExposurePointOfInterestSupported else { return }
+        guard let camera else { throw Errors.setupRequired }
+        guard camera.isExposurePointOfInterestSupported else { throw Errors.notSupported }
         try camera.lockForConfiguration()
         let pointOfInterest = CGPoint(x: 0.5, y: 0.5)
         camera.exposurePointOfInterest = pointOfInterest
@@ -201,7 +210,8 @@ public final class ObscuraCamera {
     /// - Parameters:
     ///     - point: The certain point on `previewLayer` to lock focus.
     public func lockFocus(on point: CGPoint) throws {
-        guard let camera, camera.isFocusPointOfInterestSupported else { return }
+        guard let camera else { throw Errors.setupRequired }
+        guard camera.isFocusPointOfInterestSupported else { throw Errors.notSupported }
         _focusLockPoint = nil
         try camera.lockForConfiguration()
         let pointOfInterest = _previewLayer.captureDevicePointConverted(fromLayerPoint: point)
@@ -212,7 +222,8 @@ public final class ObscuraCamera {
     
     /// Unlocks the focus.
     public func unlockFocus() throws {
-        guard let camera, camera.isFocusPointOfInterestSupported else { return }
+        guard let camera else { throw Errors.setupRequired }
+        guard camera.isFocusPointOfInterestSupported else { throw Errors.notSupported }
         try camera.lockForConfiguration()
         let pointOfInterest = CGPoint(x: 0.5, y: 0.5)
         camera.focusPointOfInterest = pointOfInterest
