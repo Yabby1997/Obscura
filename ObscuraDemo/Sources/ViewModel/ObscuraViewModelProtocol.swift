@@ -8,6 +8,7 @@
 
 import Foundation
 import QuartzCore
+import Photos
 
 protocol ObscuraViewModelProtocol: ObservableObject {
     var previewLayer: CALayer { get }
@@ -20,7 +21,7 @@ protocol ObscuraViewModelProtocol: ObservableObject {
     var isHDREnabled: Bool { get set }
     var zoomFactor: CGFloat { get set }
     var maxZoomFactor: CGFloat { get }
-    var captureResult: URL? { get set }
+    var captureResult: [URL]? { get set }
     
     func setupIfNeeded()
     func didTapUnlock()

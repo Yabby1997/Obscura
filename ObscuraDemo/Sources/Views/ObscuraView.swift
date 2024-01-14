@@ -7,6 +7,7 @@
 //
 
 import SwiftUI
+//import PhotosUI
 
 struct ObscuraView<ViewModel>: View where ViewModel: ObscuraViewModelProtocol {
     @StateObject var viewModel: ViewModel
@@ -114,12 +115,8 @@ struct ObscuraView<ViewModel>: View where ViewModel: ObscuraViewModelProtocol {
                 set: { _, _ in viewModel.captureResult = nil }
             )
         ){
-            if let captureResult = viewModel.captureResult,
-               let data = try? Data(contentsOf: captureResult),
-               let image = UIImage(data: data) {
-                Image(uiImage: image)
-                    .resizable()
-                    .scaledToFit()
+            if let result = viewModel.captureResult {
+                LivePhotoView(urls: result)
             }
         }
     }

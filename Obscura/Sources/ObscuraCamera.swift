@@ -19,6 +19,8 @@ public final class ObscuraCamera: NSObject {
         case setupRequired
         /// Indicates that the action requested is not supported.
         case notSupported
+        /// Indicates that the capturing has been failed.
+        case failedToCapture
     }
     
     // MARK: - Dependencies
@@ -26,7 +28,6 @@ public final class ObscuraCamera: NSObject {
     private var camera: AVCaptureDevice?
     private let captureSession = AVCaptureSession()
     private let photoOutput =  AVCapturePhotoOutput()
-    private var captureContinuation: CheckedContinuation<URL?, Error>?
     
     // MARK: - Private Properties
     
@@ -40,6 +41,10 @@ public final class ObscuraCamera: NSObject {
     @Published private var _isExposureLocked: Bool = false
     @Published private var _isFocusLocked: Bool = false
     @Published private var _zoomFactor: CGFloat = 1
+    @Published private var _isCapturing = false
+    
+    private var photoContinuation: CheckedContinuation<URL, Error>?
+    private var videoContinuation: CheckedContinuation<URL, Error>?
     
     // MARK: - Public Properties
     
@@ -67,6 +72,8 @@ public final class ObscuraCamera: NSObject {
     public var isFocusLocked: AnyPublisher<Bool, Never> { $_isFocusLocked.eraseToAnyPublisher() }
     /// A `CGFloat` value indicating the current zoom factor.
     public var zoomFactor: AnyPublisher<CGFloat, Never> { $_zoomFactor.eraseToAnyPublisher() }
+    /// A `Bool` value indicating the camera is currently capturing.
+    public var isCapturing: AnyPublisher<Bool, Never> { $_isCapturing.eraseToAnyPublisher() }
     
     
     // MARK: - Initializers
@@ -142,12 +149,13 @@ public final class ObscuraCamera: NSObject {
         captureSession.addInput(input)
         self.camera = camera
         
-        guard captureSession.canSetSessionPreset(.photo) else { return }
-        captureSession.sessionPreset = .photo
-        
         guard self.captureSession.canAddOutput(photoOutput) else { return }
         self.captureSession.addOutput(photoOutput)
         photoOutput.connection(with: .video)?.videoOrientation = .portrait
+        photoOutput.isLivePhotoCaptureEnabled = photoOutput.isLivePhotoCaptureSupported
+        
+        guard captureSession.canSetSessionPreset(.photo) else { return }
+        captureSession.sessionPreset = .photo
         
         _previewLayer.videoGravity = .resizeAspectFill
         _previewLayer.connection?.videoOrientation = .portrait
@@ -241,13 +249,30 @@ public final class ObscuraCamera: NSObject {
         _focusLockPoint = nil
     }
     
-    /// Captures photo.
+    /// Captures live photo.
     ///
-    ///  - Returns: An `URL` that represents captured photo saved in App's Sandbox.
-    public func capture() async throws -> URL? {
-        photoOutput.capturePhoto(with: .init(), delegate: self)
-        return try await withCheckedThrowingContinuation { [weak self] continuation in
-            self?.captureContinuation = continuation
+    /// - Important: Returns `nil` if the camera is already in the process of capturing for the previous capture request.
+    /// - Returns: An ``ObscuraCaptureResult`` that contains URLs which represents captured image and video saved in app sandbox.
+    public func capture() async throws -> ObscuraCaptureResult? {
+        guard !_isCapturing else { return nil }
+        
+        let photoSetting = AVCapturePhotoSettings()
+        photoSetting.livePhotoMovieFileURL = URL.documentsDirectory.appending(path: UUID().uuidString + ".mov")
+
+        photoOutput.capturePhoto(with: photoSetting, delegate: self)
+        return try await withCheckedThrowingContinuation { continuation in
+            Task {
+                _isCapturing = true
+                do {
+                    let photoURL = try await withCheckedThrowingContinuation { [weak self] continuation in self?.photoContinuation = continuation }
+                    let videoURL = try await withCheckedThrowingContinuation { [weak self] continuation in self?.videoContinuation = continuation }
+                    continuation.resume(returning: ObscuraCaptureResult(image: photoURL, video: videoURL))
+                    _isCapturing = false
+                } catch {
+                    continuation.resume(throwing: error)
+                    _isCapturing = false
+                }
+            }
         }
     }
 }
@@ -255,21 +280,36 @@ public final class ObscuraCamera: NSObject {
 extension ObscuraCamera: AVCapturePhotoCaptureDelegate {
     public func photoOutput(_ output: AVCapturePhotoOutput, didFinishProcessingPhoto photo: AVCapturePhoto, error: Error?) {
         if let error {
-            captureContinuation?.resume(throwing: error)
+            photoContinuation?.resume(throwing: error)
             return
         }
 
         guard let fileData = photo.fileDataRepresentation() else {
-            captureContinuation?.resume(returning: nil)
+            photoContinuation?.resume(throwing: Errors.failedToCapture)
             return
         }
         
-        let url = URL.documentsDirectory.appending(path: UUID().uuidString)
         do {
+            let url = URL.documentsDirectory.appending(path: UUID().uuidString + ".jpeg")
             try fileData.write(to: url, options: [.atomic, .completeFileProtection])
-            captureContinuation?.resume(returning: url)
+            photoContinuation?.resume(returning: url)
         } catch {
-            captureContinuation?.resume(throwing: error)
+            photoContinuation?.resume(throwing: error)
         }
+    }
+    
+    public func photoOutput(
+        _ output: AVCapturePhotoOutput,
+        didFinishProcessingLivePhotoToMovieFileAt outputFileURL: URL,
+        duration: CMTime,
+        photoDisplayTime: CMTime,
+        resolvedSettings: AVCaptureResolvedPhotoSettings,
+        error: Error?
+    ) {
+        if let error {
+            videoContinuation?.resume(throwing: error)
+            return
+        }
+        videoContinuation?.resume(returning: outputFileURL)
     }
 }
