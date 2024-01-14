@@ -20,10 +20,12 @@ protocol ObscuraViewModelProtocol: ObservableObject {
     var isHDREnabled: Bool { get set }
     var zoomFactor: CGFloat { get set }
     var maxZoomFactor: CGFloat { get }
+    var captureResult: URL? { get set }
     
     func setupIfNeeded()
     func didTapUnlock()
     func didTap(point: CGPoint)
     func setHDRMode(isEnabled: Bool)
     func zoom(factor: CGFloat)
+    func didTapShutter()
 }

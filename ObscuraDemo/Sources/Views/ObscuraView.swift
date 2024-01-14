@@ -12,7 +12,7 @@ struct ObscuraView<ViewModel>: View where ViewModel: ObscuraViewModelProtocol {
     @StateObject var viewModel: ViewModel
     @Environment(\.openURL) var openURL
     @Environment(\.scenePhase) var scenePhase
-
+    
     var body: some View {
         ZStack {
             CameraViewRepresentable(previewLayer: viewModel.previewLayer)
@@ -82,6 +82,13 @@ struct ObscuraView<ViewModel>: View where ViewModel: ObscuraViewModelProtocol {
                     }) {}
                         .labelsHidden()
                 }
+                Button {
+                    viewModel.didTapShutter()
+                } label: {
+                    Circle()
+                }
+                .frame(width: 30, height: 30)
+                .foregroundStyle(.red)
             }
         }
         .onAppear { viewModel.setupIfNeeded() }
@@ -100,6 +107,20 @@ struct ObscuraView<ViewModel>: View where ViewModel: ObscuraViewModelProtocol {
                     fatalError("Can't demo without camera access")
                 }
             )
+        }
+        .sheet(
+            isPresented: Binding(
+                get: { viewModel.captureResult != nil },
+                set: { _, _ in viewModel.captureResult = nil }
+            )
+        ){
+            if let captureResult = viewModel.captureResult,
+               let data = try? Data(contentsOf: captureResult),
+               let image = UIImage(data: data) {
+                Image(uiImage: image)
+                    .resizable()
+                    .scaledToFit()
+            }
         }
     }
 }

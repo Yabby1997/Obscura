@@ -10,7 +10,7 @@ import Combine
 import AVFoundation
 
 /// A class that wraps `AVCaptureDevice` and `AVCaptureSession` to provide a convenient interface for camera operations.
-public final class ObscuraCamera {
+public final class ObscuraCamera: NSObject {
     /// Errors that can occur while using ``ObscuraCamera``.
     public enum Errors: Error {
         /// Indicates that camera access is not authorized.
@@ -24,7 +24,9 @@ public final class ObscuraCamera {
     // MARK: - Dependencies
     
     private var camera: AVCaptureDevice?
-    private var captureSession = AVCaptureSession()
+    private let captureSession = AVCaptureSession()
+    private let photoOutput =  AVCapturePhotoOutput()
+    private var captureContinuation: CheckedContinuation<URL?, Error>?
     
     // MARK: - Private Properties
     
@@ -68,19 +70,20 @@ public final class ObscuraCamera {
     
     
     // MARK: - Initializers
-
+    
     /// Creates an ``ObscuraCamera`` instance.
     ///
     /// - Important: Ensure to call ``setup()`` before utilizing the camera features.
-    public init() {
+    public override init() {
         self._previewLayer = AVCaptureVideoPreviewLayer(session: captureSession)
+        super.init()
         
         captureSession.publisher(for: \.isRunning)
             .assign(to: &$isRunning)
     }
     
     // MARK: - Public Methods
-
+    
     /// Sets up the camera.
     ///
     /// - Throws: Errors that occurred while configuring camera including authorization error.
@@ -97,10 +100,10 @@ public final class ObscuraCamera {
         
         camera.publisher(for: \.maxAvailableVideoZoomFactor)
             .assign(to: &$maxZoomFactor)
-
+        
         camera.publisher(for: \.videoZoomFactor)
             .assign(to: &$_zoomFactor)
-
+        
         camera.publisher(for: \.iso)
             .assign(to: &$_iso)
         
@@ -138,12 +141,18 @@ public final class ObscuraCamera {
         guard captureSession.canAddInput(input) else { return }
         captureSession.addInput(input)
         self.camera = camera
-
+        
         guard captureSession.canSetSessionPreset(.photo) else { return }
         captureSession.sessionPreset = .photo
-
+        
+        guard self.captureSession.canAddOutput(photoOutput) else { return }
+        self.captureSession.addOutput(photoOutput)
+        photoOutput.connection(with: .video)?.videoOrientation = .portrait
+        
         _previewLayer.videoGravity = .resizeAspectFill
         _previewLayer.connection?.videoOrientation = .portrait
+        
+        photoOutput.isLivePhotoCaptureEnabled = photoOutput.isLivePhotoCaptureSupported
         
         captureSession.startRunning()
     }
@@ -230,5 +239,37 @@ public final class ObscuraCamera {
         camera.focusMode = .continuousAutoFocus
         camera.unlockForConfiguration()
         _focusLockPoint = nil
+    }
+    
+    /// Captures photo.
+    ///
+    ///  - Returns: An `URL` that represents captured photo saved in App's Sandbox.
+    public func capture() async throws -> URL? {
+        photoOutput.capturePhoto(with: .init(), delegate: self)
+        return try await withCheckedThrowingContinuation { [weak self] continuation in
+            self?.captureContinuation = continuation
+        }
+    }
+}
+
+extension ObscuraCamera: AVCapturePhotoCaptureDelegate {
+    public func photoOutput(_ output: AVCapturePhotoOutput, didFinishProcessingPhoto photo: AVCapturePhoto, error: Error?) {
+        if let error {
+            captureContinuation?.resume(throwing: error)
+            return
+        }
+
+        guard let fileData = photo.fileDataRepresentation() else {
+            captureContinuation?.resume(returning: nil)
+            return
+        }
+        
+        let url = URL.documentsDirectory.appending(path: UUID().uuidString)
+        do {
+            try fileData.write(to: url, options: [.atomic, .completeFileProtection])
+            captureContinuation?.resume(returning: url)
+        } catch {
+            captureContinuation?.resume(throwing: error)
+        }
     }
 }

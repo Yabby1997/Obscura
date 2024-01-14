@@ -24,6 +24,7 @@ final class AELDemoViewModel: ObscuraViewModelProtocol {
     @Published var isLockMode = false
     @Published var isHDREnabled = false
     @Published var zoomFactor: CGFloat = 1.0
+    @Published var captureResult: URL? = nil
     var maxZoomFactor: CGFloat { obscuraCamera.maxZoomFactor }
     
     init() {
@@ -92,5 +93,11 @@ final class AELDemoViewModel: ObscuraViewModelProtocol {
     
     func zoom(factor: CGFloat) {
         try? obscuraCamera.zoom(factor: factor)
+    }
+    
+    func didTapShutter() {
+        Task { @MainActor in 
+            captureResult = try? await obscuraCamera.capture()
+        }
     }
 }
