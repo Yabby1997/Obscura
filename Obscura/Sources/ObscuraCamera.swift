@@ -46,6 +46,13 @@ public final class ObscuraCamera: NSObject {
     private var photoContinuation: CheckedContinuation<URL, Error>?
     private var videoContinuation: CheckedContinuation<URL, Error>?
     
+    private let captureFormat: [String: Any] = [
+        AVVideoCodecKey: AVVideoCodecType.hevc,
+        AVVideoCompressionPropertiesKey: [
+            AVVideoQualityKey: 0.6,
+        ],
+    ]
+    
     // MARK: - Public Properties
     
     /// A `Bool` value indicating whether the camera is running.
@@ -256,8 +263,9 @@ public final class ObscuraCamera: NSObject {
     public func capture() async throws -> ObscuraCaptureResult? {
         guard !_isCapturing else { return nil }
         
-        let photoSetting = AVCapturePhotoSettings()
+        let photoSetting = AVCapturePhotoSettings(format: captureFormat)
         photoSetting.livePhotoMovieFileURL = URL.documentsDirectory.appending(path: UUID().uuidString + ".mov")
+        photoSetting.photoQualityPrioritization = .speed
 
         photoOutput.capturePhoto(with: photoSetting, delegate: self)
         return try await withCheckedThrowingContinuation { continuation in
