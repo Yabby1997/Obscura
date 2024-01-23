@@ -46,13 +46,6 @@ public final class ObscuraCamera: NSObject {
     private var photoContinuation: CheckedContinuation<URL, Error>?
     private var videoContinuation: CheckedContinuation<URL, Error>?
     
-    private let captureFormat: [String: Any] = [
-        AVVideoCodecKey: AVVideoCodecType.hevc,
-        AVVideoCompressionPropertiesKey: [
-            AVVideoQualityKey: 0.6,
-        ],
-    ]
-    
     // MARK: - Public Properties
     
     /// A `Bool` value indicating whether the camera is running.
@@ -102,12 +95,16 @@ public final class ObscuraCamera: NSObject {
     ///
     /// - Throws: Errors that occurred while configuring camera including authorization error.
     public func setup() async throws {
-        guard await AVCaptureDevice.requestAccess(for: .video) else {
+        guard await AVCaptureDevice.requestAccess(for: .video),
+              await AVCaptureDevice.requestAccess(for: .audio) else {
             throw Errors.notAuthorized
         }
         
         guard let camera = AVCaptureDevice.default(for: .video) else { return }
-        let input = try AVCaptureDeviceInput(device: camera)
+        let cameraInput = try AVCaptureDeviceInput(device: camera)
+        guard captureSession.canAddInput(cameraInput) else { return }
+        captureSession.addInput(cameraInput)
+        self.camera = camera
         
         camera.publisher(for: \.isVideoHDREnabled)
             .assign(to: &$_isHDREnabled)
@@ -152,9 +149,10 @@ public final class ObscuraCamera: NSObject {
             }
             .assign(to: &$_focusLockPoint)
         
-        guard captureSession.canAddInput(input) else { return }
-        captureSession.addInput(input)
-        self.camera = camera
+        guard let mic = AVCaptureDevice.default(for: .audio) else { return }
+        let micInput = try AVCaptureDeviceInput(device: mic)
+        guard captureSession.canAddInput(micInput) else { return }
+        captureSession.addInput(micInput)
         
         guard self.captureSession.canAddOutput(photoOutput) else { return }
         self.captureSession.addOutput(photoOutput)
@@ -263,9 +261,9 @@ public final class ObscuraCamera: NSObject {
     public func capture() async throws -> ObscuraCaptureResult? {
         guard !_isCapturing else { return nil }
         
-        let photoSetting = AVCapturePhotoSettings(format: captureFormat)
+        let photoSetting = AVCapturePhotoSettings(format:  [AVVideoCodecKey: AVVideoCodecType.hevc])
         photoSetting.livePhotoMovieFileURL = URL.documentsDirectory.appending(path: UUID().uuidString + ".mov")
-        photoSetting.photoQualityPrioritization = .speed
+        photoSetting.photoQualityPrioritization = photoOutput.maxPhotoQualityPrioritization
 
         photoOutput.capturePhoto(with: photoSetting, delegate: self)
         return try await withCheckedThrowingContinuation { continuation in

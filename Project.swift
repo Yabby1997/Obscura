@@ -20,6 +20,7 @@ let targets: [Target] = [
             with: [
                 "UILaunchStoryboardName": "LaunchScreen",
                 "NSCameraUsageDescription": "Camera permission is needed for ObscuraDemo",
+                "NSMicrophoneUsageDescription": "Mic permission is needed for ObscuraDemo",
             ]
         ),
         sources: ["ObscuraDemo/Sources/**"],
