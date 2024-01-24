@@ -154,8 +154,8 @@ public final class ObscuraCamera: NSObject {
         guard captureSession.canAddInput(micInput) else { return }
         captureSession.addInput(micInput)
         
-        guard self.captureSession.canAddOutput(photoOutput) else { return }
-        self.captureSession.addOutput(photoOutput)
+        guard captureSession.canAddOutput(photoOutput) else { return }
+        captureSession.addOutput(photoOutput)
         photoOutput.connection(with: .video)?.videoOrientation = .portrait
         photoOutput.isLivePhotoCaptureEnabled = photoOutput.isLivePhotoCaptureSupported
         
@@ -280,6 +280,17 @@ public final class ObscuraCamera: NSObject {
                 }
             }
         }
+    }
+    
+    /// Stops camera session.
+    public func stop() async {
+        captureSession.stopRunning()
+    }
+    
+    /// Starts camera session.
+    public func start() async {
+        guard !isRunning else { return }
+        captureSession.startRunning()
     }
 }
 
