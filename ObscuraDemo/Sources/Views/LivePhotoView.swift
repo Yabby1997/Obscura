@@ -9,6 +9,11 @@
 import SwiftUI
 import PhotosUI
 
+struct CaptureResult: Equatable {
+    let image: URL
+    let video: URL
+}
+
 struct LivePhotoView: UIViewRepresentable, Equatable {
     var urls: [URL]
     

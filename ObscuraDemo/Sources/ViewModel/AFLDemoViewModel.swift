@@ -96,7 +96,10 @@ final class AFLDemoViewModel: ObscuraViewModelProtocol {
     
     func didTapShutter() {
         Task { @MainActor in
-            captureResult = try? await obscuraCamera.capture()?.array
+            let result = try? await obscuraCamera.capture()
+            captureResult = [result?.imagePath, result?.videoPath]
+                .compactMap { $0 }
+                .map { URL.documentsDirectory.appending(path: $0) }
         }
     }
 }

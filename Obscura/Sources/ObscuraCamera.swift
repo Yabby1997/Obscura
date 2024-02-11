@@ -43,8 +43,11 @@ public final class ObscuraCamera: NSObject {
     @Published private var _zoomFactor: CGFloat = 1
     @Published private var _isCapturing = false
     
-    private var photoContinuation: CheckedContinuation<URL, Error>?
-    private var videoContinuation: CheckedContinuation<URL, Error>?
+    private var photoContinuation: CheckedContinuation<String, Error>?
+    private var videoContinuation: CheckedContinuation<String, Error>?
+    
+    private let imageDirectory = URL.homeDirectory.appending(path: "Documents/Obscura/Images")
+    private let videoDirectory = URL.homeDirectory.appending(path: "Documents/Obscura/Videos")
     
     // MARK: - Public Properties
     
@@ -89,12 +92,28 @@ public final class ObscuraCamera: NSObject {
             .assign(to: &$isRunning)
     }
     
+    private func createDirectoryIfNeeded(for path: String) throws {
+        if FileManager.default.fileExists(atPath: path) {
+            print("Directory Exists: \(path)")
+            return
+        }
+        try FileManager.default.createDirectory(
+            atPath: path,
+            withIntermediateDirectories: true,
+            attributes: nil
+        )
+        print("Directory Created: \(path)")
+    }
+    
     // MARK: - Public Methods
     
     /// Sets up the camera.
     ///
     /// - Throws: Errors that occurred while configuring camera including authorization error.
     public func setup() async throws {
+        try createDirectoryIfNeeded(for: imageDirectory.path)
+        try createDirectoryIfNeeded(for: videoDirectory.path)
+
         guard await AVCaptureDevice.requestAccess(for: .video),
               await AVCaptureDevice.requestAccess(for: .audio) else {
             throw Errors.notAuthorized
@@ -262,7 +281,7 @@ public final class ObscuraCamera: NSObject {
         guard !_isCapturing else { return nil }
         
         let photoSetting = AVCapturePhotoSettings(format:  [AVVideoCodecKey: AVVideoCodecType.hevc])
-        photoSetting.livePhotoMovieFileURL = URL.documentsDirectory.appending(path: UUID().uuidString + ".mov")
+        photoSetting.livePhotoMovieFileURL = videoDirectory.appending(path: UUID().uuidString + ".mov")
         photoSetting.photoQualityPrioritization = photoOutput.maxPhotoQualityPrioritization
 
         photoOutput.capturePhoto(with: photoSetting, delegate: self)
@@ -270,9 +289,9 @@ public final class ObscuraCamera: NSObject {
             Task {
                 _isCapturing = true
                 do {
-                    let photoURL = try await withCheckedThrowingContinuation { [weak self] continuation in self?.photoContinuation = continuation }
-                    let videoURL = try await withCheckedThrowingContinuation { [weak self] continuation in self?.videoContinuation = continuation }
-                    continuation.resume(returning: ObscuraCaptureResult(image: photoURL, video: videoURL))
+                    let imagePath = try await withCheckedThrowingContinuation { [weak self] continuation in self?.photoContinuation = continuation }
+                    let videoPath = try await withCheckedThrowingContinuation { [weak self] continuation in self?.videoContinuation = continuation }
+                    continuation.resume(returning: ObscuraCaptureResult(imagePath: imagePath, videoPath: videoPath))
                     _isCapturing = false
                 } catch {
                     continuation.resume(throwing: error)
@@ -307,9 +326,9 @@ extension ObscuraCamera: AVCapturePhotoCaptureDelegate {
         }
         
         do {
-            let url = URL.documentsDirectory.appending(path: UUID().uuidString + ".jpeg")
-            try fileData.write(to: url, options: [.atomic, .completeFileProtection])
-            photoContinuation?.resume(returning: url)
+            let outputFileURL = imageDirectory.appending(path: UUID().uuidString + ".jpeg")
+            try fileData.write(to: outputFileURL, options: [.atomic, .completeFileProtection])
+            photoContinuation?.resume(returning: outputFileURL.relativePath)
         } catch {
             photoContinuation?.resume(throwing: error)
         }
@@ -327,6 +346,13 @@ extension ObscuraCamera: AVCapturePhotoCaptureDelegate {
             videoContinuation?.resume(throwing: error)
             return
         }
-        videoContinuation?.resume(returning: outputFileURL)
+        videoContinuation?.resume(returning: outputFileURL.relativePath)
+    }
+}
+
+extension URL {
+    var relativePath: String {
+        guard path.hasPrefix(URL.homeDirectory.path) else { return path }
+        return String(path.dropFirst(URL.homeDirectory.path.count))
     }
 }

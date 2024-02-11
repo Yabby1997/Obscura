@@ -8,11 +8,10 @@
 
 import Foundation
 
-/// Capture result by ``ObscuraCamera``.
+/// Capture result of ``ObscuraCamera``.
 public struct ObscuraCaptureResult {
-    public let image: URL
-    public let video: URL
-    
-    /// A `URL` array that consists of ``image`` and ``video``.
-    public var array: [URL] { [image, video] }
+    /// Relative path to image file from Home directory.
+    public let imagePath: String
+    /// Relative path to video file from Home directory.
+    public let videoPath: String?
 }
