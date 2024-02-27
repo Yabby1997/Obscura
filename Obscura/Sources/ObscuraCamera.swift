@@ -107,15 +107,19 @@ public final class ObscuraCamera: NSObject {
     
     // MARK: - Public Methods
     
-    /// Sets up the camera.
+    /// Sets up the ``ObscuraCamera``.
     ///
-    /// - Throws: Errors that occurred while configuring camera including authorization error.
+    /// Call this method prior to using the camera. If this method fails, any of its functionality will work properly.
+    ///
+    /// - Throws: Errors that occurred while configuring the camera, including authorization errors.
+    ///
+    /// - Important: If it throws an authorization error, ``Errors/notAuthorized``, you must guide your user to manually grant authorization to use the camera and then call this method to try again.
+    /// - Note: The LivePhoto and video capture features require microphone usage authorization as well. However, unlike the camera, microphone usage is not mandatory and is omitted in this method. To request microphone usage authorization, call ``requestMicAuthorization()``.
     public func setup() async throws {
         try createDirectoryIfNeeded(for: imageDirectory.path)
         try createDirectoryIfNeeded(for: videoDirectory.path)
 
-        guard await AVCaptureDevice.requestAccess(for: .video),
-              await AVCaptureDevice.requestAccess(for: .audio) else {
+        guard await AVCaptureDevice.requestAccess(for: .video) else {
             throw Errors.notAuthorized
         }
         
@@ -168,11 +172,6 @@ public final class ObscuraCamera: NSObject {
             }
             .assign(to: &$_focusLockPoint)
         
-        guard let mic = AVCaptureDevice.default(for: .audio) else { return }
-        let micInput = try AVCaptureDeviceInput(device: mic)
-        guard captureSession.canAddInput(micInput) else { return }
-        captureSession.addInput(micInput)
-        
         guard captureSession.canAddOutput(photoOutput) else { return }
         captureSession.addOutput(photoOutput)
         photoOutput.connection(with: .video)?.videoOrientation = .portrait
@@ -189,6 +188,19 @@ public final class ObscuraCamera: NSObject {
         captureSession.startRunning()
     }
     
+    /// Requests microphone usage authorization for ``ObscuraCamera``.
+    ///
+    /// Call this method along with ``setup()`` if audio recording is required for LivePhoto or video capture features.
+    ///
+    /// - Note: Although it may fail to acquire authorization, LivePhoto and video will be captured without audio recording.
+    ///
+    /// - Throws: An error of type ``Errors`` indicating failure to acquire microphone usage authorization.
+    public func requestMicAuthorization() async throws {
+        guard await AVCaptureDevice.requestAccess(for: .audio) else {
+            throw Errors.notAuthorized
+        }
+    }
+
     /// Sets the zoom factor.
     ///
     /// - Parameters:
@@ -273,16 +285,32 @@ public final class ObscuraCamera: NSObject {
         _focusLockPoint = nil
     }
     
-    /// Captures live photo.
+    /// Captures a LivePhoto.
     ///
-    /// - Important: Returns `nil` if the camera is already in the process of capturing for the previous capture request.
-    /// - Returns: An ``ObscuraCaptureResult`` that contains URLs which represents captured image and video saved in app sandbox.
-    public func capture() async throws -> ObscuraCaptureResult? {
+    /// Call this method to capture a LivePhoto with ``ObscuraCamera``.
+    ///
+    /// - Important: Returns `nil` if the camera is currently busy with a previous capture request.
+    /// - Note: If microphone usage authorization is not granted, the captured LivePhoto won't have audio.
+    /// - SeeAlso: ``requestMicAuthorization()``
+    /// - Returns: An ``ObscuraCaptureResult`` containing image and video URLs that can be combined into a LivePhoto in the app sandbox.
+    /// - Throws: Errors that might occur while capturing LivePhoto.
+    public func captureLivePhoto() async throws -> ObscuraCaptureResult? {
         guard !_isCapturing else { return nil }
         
-        let photoSetting = AVCapturePhotoSettings(format:  [AVVideoCodecKey: AVVideoCodecType.hevc])
+        let photoSetting = AVCapturePhotoSettings(
+            format:  [
+                AVVideoCodecKey: AVVideoCodecType.hevc,
+                AVVideoCompressionPropertiesKey: [AVVideoQualityKey: 0.5],
+            ]
+        )
         photoSetting.livePhotoMovieFileURL = videoDirectory.appending(path: UUID().uuidString + ".mov")
-        photoSetting.photoQualityPrioritization = photoOutput.maxPhotoQualityPrioritization
+        photoSetting.photoQualityPrioritization = .speed
+        
+        if let mic = AVCaptureDevice.default(for: .audio),
+           let micInput = try? AVCaptureDeviceInput(device: mic),
+           captureSession.canAddInput(micInput) {
+            captureSession.addInput(micInput)
+        }
 
         photoOutput.capturePhoto(with: photoSetting, delegate: self)
         return try await withCheckedThrowingContinuation { continuation in
@@ -292,6 +320,46 @@ public final class ObscuraCamera: NSObject {
                     let imagePath = try await withCheckedThrowingContinuation { [weak self] continuation in self?.photoContinuation = continuation }
                     let videoPath = try await withCheckedThrowingContinuation { [weak self] continuation in self?.videoContinuation = continuation }
                     continuation.resume(returning: ObscuraCaptureResult(imagePath: imagePath, videoPath: videoPath))
+                    if let micInput = (captureSession.inputs.first { $0.ports.contains { $0.sourceDeviceType == .builtInMicrophone } }) {
+                        captureSession.removeInput(micInput)
+                    }
+                    _isCapturing = false
+                } catch {
+                    continuation.resume(throwing: error)
+                    if let micInput = (captureSession.inputs.first { $0.ports.contains { $0.sourceDeviceType == .builtInMicrophone } }) {
+                        captureSession.removeInput(micInput)
+                    }
+                    _isCapturing = false
+                }
+            }
+        }
+    }
+    
+    /// Captures a photo.
+    ///
+    /// Call this method to capture a still photo with ``ObscuraCamera``.
+    ///
+    /// - Important: Returns `nil` if the camera is currently busy with a previous capture request.
+    /// - Returns: An ``ObscuraCaptureResult`` containing the image URL in the app sandbox.
+    /// - Throws: Errors that might occur while capturing the photo.
+    public func capturePhoto() async throws -> ObscuraCaptureResult? {
+        guard !_isCapturing else { return nil }
+        
+        let photoSetting = AVCapturePhotoSettings(
+            format:  [
+                AVVideoCodecKey: AVVideoCodecType.hevc,
+                AVVideoCompressionPropertiesKey: [AVVideoQualityKey: 0.5],
+            ]
+        )
+        photoSetting.photoQualityPrioritization = .speed
+
+        photoOutput.capturePhoto(with: photoSetting, delegate: self)
+        return try await withCheckedThrowingContinuation { continuation in
+            Task {
+                _isCapturing = true
+                do {
+                    let imagePath = try await withCheckedThrowingContinuation { [weak self] continuation in self?.photoContinuation = continuation }
+                    continuation.resume(returning: ObscuraCaptureResult(imagePath: imagePath, videoPath: nil))
                     _isCapturing = false
                 } catch {
                     continuation.resume(throwing: error)
