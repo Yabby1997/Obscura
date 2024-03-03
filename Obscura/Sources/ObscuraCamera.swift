@@ -183,8 +183,6 @@ public final class ObscuraCamera: NSObject {
         _previewLayer.videoGravity = .resizeAspectFill
         _previewLayer.connection?.videoOrientation = .portrait
         
-        photoOutput.isLivePhotoCaptureEnabled = photoOutput.isLivePhotoCaptureSupported
-        
         captureSession.startRunning()
     }
     
@@ -345,13 +343,8 @@ public final class ObscuraCamera: NSObject {
     public func capturePhoto() async throws -> ObscuraCaptureResult? {
         guard !_isCapturing else { return nil }
         
-        let photoSetting = AVCapturePhotoSettings(
-            format:  [
-                AVVideoCodecKey: AVVideoCodecType.hevc,
-                AVVideoCompressionPropertiesKey: [AVVideoQualityKey: 0.5],
-            ]
-        )
-        photoSetting.photoQualityPrioritization = .speed
+        let photoSetting = AVCapturePhotoSettings(format:  [AVVideoCodecKey: AVVideoCodecType.hevc])
+        photoSetting.photoQualityPrioritization = photoOutput.maxPhotoQualityPrioritization
 
         photoOutput.capturePhoto(with: photoSetting, delegate: self)
         return try await withCheckedThrowingContinuation { continuation in
