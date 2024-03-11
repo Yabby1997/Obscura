@@ -109,9 +109,9 @@ public final class ObscuraCamera: NSObject {
     
     /// Sets up the ``ObscuraCamera``.
     ///
-    /// Call this method prior to using the camera. If this method fails, any of its functionality will work properly.
+    /// Call this method prior to using the camera. If this method fails, any of its functionality will not work properly.
     ///
-    /// - Throws: Errors that occurred while configuring the camera, including authorization errors.
+    /// - Throws: Errors that occurred while configuring the camera, including authorization error.
     ///
     /// - Important: If it throws an authorization error, ``Errors/notAuthorized``, you must guide your user to manually grant authorization to use the camera and then call this method to try again.
     /// - Note: The LivePhoto and video capture features require microphone usage authorization as well. However, unlike the camera, microphone usage is not mandatory and is omitted in this method. To request microphone usage authorization, call ``requestMicAuthorization()``.
