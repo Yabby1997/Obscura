@@ -10,6 +10,7 @@ import Foundation
 import QuartzCore
 import Photos
 
+@MainActor
 protocol ObscuraViewModelProtocol: ObservableObject {
     var previewLayer: CALayer { get }
     var shouldShowSettings: Bool { get set }

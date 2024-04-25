@@ -6,102 +6,127 @@
 //  Copyright © 2023 seunghun. All rights reserved.
 //
 
-import Combine
+@preconcurrency import Combine
 import Foundation
 import Obscura
-import QuartzCore
+@preconcurrency import QuartzCore
 
 final class AELAFLDemoViewModel: ObscuraViewModelProtocol {
     private let obscuraCamera = ObscuraCamera()
-    var previewLayer: CALayer { obscuraCamera.previewLayer }
+    let previewLayer: CALayer
     
+    @Published var isRunning = false
     @Published var shouldShowSettings = false
     @Published var iso: Float = .zero
     @Published var shutterSpeed: Float = .zero
     @Published var aperture: Float = .zero
     @Published var lockPoint: CGPoint? = nil
     @Published var isLocked = false
-    @Published var isLockMode = false
     @Published var isHDREnabled = false
     @Published var zoomFactor: CGFloat = 1.0
     @Published var captureResult: [URL]? = nil
-    var maxZoomFactor: CGFloat { obscuraCamera.maxZoomFactor }
+    @Published var maxZoomFactor: CGFloat = 1.0
     
     init() {
-        obscuraCamera.iso
-            .receive(on: DispatchQueue.main)
-            .assign(to: &$iso)
-        
-        obscuraCamera.shutterSpeed
-            .receive(on: DispatchQueue.main)
-            .assign(to: &$shutterSpeed)
-        
-        obscuraCamera.aperture
-            .receive(on: DispatchQueue.main)
-            .assign(to: &$aperture)
-        
-        obscuraCamera.exposureLockPoint.combineLatest(obscuraCamera.focusLockPoint)
-            .filter { $0 == $1 }
-            .map { $0.0 }
-            .receive(on: DispatchQueue.main)
-            .assign(to: &$lockPoint)
-        
-        obscuraCamera.isExposureLocked.combineLatest(obscuraCamera.isFocusLocked)
-            .map { $0 == $1 && $0 }
-            .receive(on: DispatchQueue.main)
-            .assign(to: &$isLocked)
-        
-        obscuraCamera.isExposureLocked.combineLatest(obscuraCamera.isFocusLocked)
-            .debounce(for: .seconds(1.5), scheduler: DispatchQueue.main)
-            .filter { $0 == $1 && $0 }
-            .map { _ in nil }
-            .receive(on: DispatchQueue.main)
-            .assign(to: &$lockPoint)
-        
-        obscuraCamera.isHDREnabled
-            .receive(on: DispatchQueue.main)
-            .assign(to: &$isHDREnabled)
-        
-        obscuraCamera.zoomFactor
-            .receive(on: DispatchQueue.main)
-            .assign(to: &$zoomFactor)
+        previewLayer = obscuraCamera.previewLayer
+        bind()
+    }
+    
+    private func bind() {
+        Task {
+            await obscuraCamera.isRunning
+                .receive(on: DispatchQueue.main)
+                .assign(to: &$isRunning)
+            
+            await obscuraCamera.maxZoomFactor
+                .receive(on: DispatchQueue.main)
+                .assign(to: &$maxZoomFactor)
+            
+            await obscuraCamera.iso
+                .receive(on: DispatchQueue.main)
+                .assign(to: &$iso)
+            
+            await obscuraCamera.shutterSpeed
+                .receive(on: DispatchQueue.main)
+                .assign(to: &$shutterSpeed)
+            
+            await obscuraCamera.aperture
+                .receive(on: DispatchQueue.main)
+                .assign(to: &$aperture)
+            
+            let focusLockPoint = await obscuraCamera.focusLockPoint
+            let exposureLockPoint = await obscuraCamera.exposureLockPoint
+            focusLockPoint.combineLatest(exposureLockPoint)
+                .filter { $0 == $1 }
+                .map { $0.0 }
+                .receive(on: DispatchQueue.main)
+                .assign(to: &$lockPoint)
+            
+            let isFocusLocked = await obscuraCamera.isFocusLocked
+            let isExposureLocked = await obscuraCamera.isExposureLocked
+            isFocusLocked.combineLatest(isExposureLocked)
+                .map { $0 == $1 && $0 }
+                .receive(on: DispatchQueue.main)
+                .assign(to: &$isLocked)
+            
+            await obscuraCamera.isFocusLocked
+                .debounce(for: .seconds(1.5), scheduler: DispatchQueue.main)
+                .filter { $0 }
+                .map { _ in nil }
+                .receive(on: DispatchQueue.main)
+                .assign(to: &$lockPoint)
+            
+            await obscuraCamera.isHDREnabled
+                .receive(on: DispatchQueue.main)
+                .assign(to: &$isHDREnabled)
+            
+            await obscuraCamera.zoomFactor
+                .receive(on: DispatchQueue.main)
+                .assign(to: &$zoomFactor)
+        }
     }
     
     func setupIfNeeded() {
-        guard !obscuraCamera.isRunning else { return }
+        guard isRunning == false else { return }
         Task {
             do {
                 try await obscuraCamera.setup()
             } catch {
                 if case ObscuraCamera.Errors.notAuthorized = error {
-                    Task { @MainActor in
-                        shouldShowSettings = true
-                    }
+                    shouldShowSettings = true
                 }
             }
         }
     }
     
     func setHDRMode(isEnabled: Bool) {
-        try? obscuraCamera.setHDRMode(isEnabled: isEnabled)
+        Task {
+            try? await obscuraCamera.setHDRMode(isEnabled: isEnabled)
+        }
     }
     
     func didTapUnlock() {
-        try? obscuraCamera.unlockExposure()
-        try? obscuraCamera.unlockFocus()
+        Task {
+            try? await obscuraCamera.unlockExposure()
+            try? await obscuraCamera.unlockFocus()
+        }
     }
     
     func didTap(point: CGPoint) {
-        try? obscuraCamera.lockExposure(on: point)
-        try? obscuraCamera.lockFocus(on: point)
+        Task {
+            try? await obscuraCamera.lockExposure(on: point)
+            try? await obscuraCamera.lockFocus(on: point)
+        }
     }
     
     func zoom(factor: CGFloat) {
-        try? obscuraCamera.zoom(factor: factor)
+        Task {
+            try? await obscuraCamera.zoom(factor: factor)
+        }
     }
     
     func didTapShutter() {
-        Task { @MainActor in
+        Task {
             let result = try? await obscuraCamera.capturePhoto()
             captureResult = [result?.imagePath, result?.videoPath]
                 .compactMap { $0 }

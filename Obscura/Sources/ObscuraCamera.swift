@@ -10,7 +10,7 @@ import Combine
 import AVFoundation
 
 /// A class that wraps `AVCaptureDevice` and `AVCaptureSession` to provide a convenient interface for camera operations.
-public final class ObscuraCamera: NSObject {
+public final actor ObscuraCamera: NSObject {
     /// Errors that can occur while using ``ObscuraCamera``.
     public enum Errors: Error {
         /// Indicates that camera access is not authorized.
@@ -31,7 +31,9 @@ public final class ObscuraCamera: NSObject {
     
     // MARK: - Private Properties
     
-    private let _previewLayer: AVCaptureVideoPreviewLayer
+    private var _previewLayer: AVCaptureVideoPreviewLayer { previewLayer as! AVCaptureVideoPreviewLayer }
+    @Published private var _isRunning = false
+    @Published private var _maxZoomFactor: CGFloat = .infinity
     @Published private var _isHDREnabled = false
     @Published private var _iso: Float = .zero
     @Published private var _shutterSpeed: Float = .zero
@@ -51,12 +53,13 @@ public final class ObscuraCamera: NSObject {
     
     // MARK: - Public Properties
     
-    /// A `Bool` value indicating whether the camera is running.
-    @Published private(set) public var isRunning = false
-    /// A `CGFloat` value indicating the maximum zoom factor.
-    @Published private(set) public var maxZoomFactor: CGFloat = .infinity
     /// The layer that camera feed will be rendered on.
-    public var previewLayer: CALayer { _previewLayer }
+    nonisolated public let previewLayer: CALayer
+    
+    /// A `Bool` value indicating whether the camera is running.
+    public var isRunning: AnyPublisher<Bool, Never> { $_isRunning.eraseToAnyPublisher() }
+    /// A `CGFloat` value indicating the maximum zoom factor.
+    public var maxZoomFactor: AnyPublisher<CGFloat, Never> { $_maxZoomFactor.eraseToAnyPublisher() }
     /// A `Bool` value indicating whether the HDR mode is enabled.
     public var isHDREnabled: AnyPublisher<Bool, Never> { $_isHDREnabled.eraseToAnyPublisher() }
     /// The ISO value that the camera is currently using.
@@ -85,11 +88,8 @@ public final class ObscuraCamera: NSObject {
     ///
     /// - Important: Ensure to call ``setup()`` before utilizing the camera features.
     public override init() {
-        self._previewLayer = AVCaptureVideoPreviewLayer(session: captureSession)
+        self.previewLayer = AVCaptureVideoPreviewLayer(session: captureSession)
         super.init()
-        
-        captureSession.publisher(for: \.isRunning)
-            .assign(to: &$isRunning)
     }
     
     private func createDirectoryIfNeeded(for path: String) throws {
@@ -129,11 +129,14 @@ public final class ObscuraCamera: NSObject {
         captureSession.addInput(cameraInput)
         self.camera = camera
         
+        captureSession.publisher(for: \.isRunning)
+            .assign(to: &$_isRunning)
+        
         camera.publisher(for: \.isVideoHDREnabled)
             .assign(to: &$_isHDREnabled)
         
         camera.publisher(for: \.maxAvailableVideoZoomFactor)
-            .assign(to: &$maxZoomFactor)
+            .assign(to: &$_maxZoomFactor)
         
         camera.publisher(for: \.videoZoomFactor)
             .assign(to: &$_zoomFactor)
@@ -158,18 +161,12 @@ public final class ObscuraCamera: NSObject {
         
         camera.publisher(for: \.exposurePointOfInterest)
             .dropFirst()
-            .compactMap { [weak self] pointOfInterest in
-                guard let point = self?._previewLayer.layerPointConverted(fromCaptureDevicePoint: pointOfInterest) else { return nil }
-                return point
-            }
+            .map(convert)
             .assign(to: &$_exposureLockPoint)
         
         camera.publisher(for: \.focusPointOfInterest)
             .dropFirst()
-            .compactMap { [weak self] pointOfInterest in
-                guard let point = self?._previewLayer.layerPointConverted(fromCaptureDevicePoint: pointOfInterest) else { return nil }
-                return point
-            }
+            .map(convert)
             .assign(to: &$_focusLockPoint)
         
         guard captureSession.canAddOutput(photoOutput) else { return }
@@ -184,6 +181,10 @@ public final class ObscuraCamera: NSObject {
         _previewLayer.connection?.videoOrientation = .portrait
         
         captureSession.startRunning()
+    }
+    
+    private func convert(point: CGPoint) -> CGPoint {
+        _previewLayer.layerPointConverted(fromCaptureDevicePoint: point)
     }
     
     /// Requests microphone usage authorization for ``ObscuraCamera``.
@@ -206,7 +207,7 @@ public final class ObscuraCamera: NSObject {
     public func zoom(factor: CGFloat) throws {
         guard let camera else { throw Errors.setupRequired }
         try camera.lockForConfiguration()
-        camera.ramp(toVideoZoomFactor: min(factor, maxZoomFactor), withRate: 30)
+        camera.ramp(toVideoZoomFactor: min(factor, _maxZoomFactor), withRate: 30)
         camera.unlockForConfiguration()
     }
     
@@ -311,26 +312,25 @@ public final class ObscuraCamera: NSObject {
         }
 
         photoOutput.capturePhoto(with: photoSetting, delegate: self)
-        return try await withCheckedThrowingContinuation { continuation in
-            Task {
-                _isCapturing = true
-                do {
-                    let imagePath = try await withCheckedThrowingContinuation { [weak self] continuation in self?.photoContinuation = continuation }
-                    let videoPath = try await withCheckedThrowingContinuation { [weak self] continuation in self?.videoContinuation = continuation }
-                    continuation.resume(returning: ObscuraCaptureResult(imagePath: imagePath, videoPath: videoPath))
-                    if let micInput = (captureSession.inputs.first { $0.ports.contains { $0.sourceDeviceType == .builtInMicrophone } }) {
-                        captureSession.removeInput(micInput)
-                    }
-                    _isCapturing = false
-                } catch {
-                    continuation.resume(throwing: error)
-                    if let micInput = (captureSession.inputs.first { $0.ports.contains { $0.sourceDeviceType == .builtInMicrophone } }) {
-                        captureSession.removeInput(micInput)
-                    }
-                    _isCapturing = false
+        return try await Task {
+            _isCapturing = true
+            do {
+                let imagePath = try await withCheckedThrowingContinuation { photoContinuation = $0 }
+                let videoPath = try await withCheckedThrowingContinuation { videoContinuation = $0 }
+                if let micInput = (captureSession.inputs.first { $0.ports.contains { $0.sourceDeviceType == .builtInMicrophone } }) {
+                    captureSession.removeInput(micInput)
                 }
+                _isCapturing = false
+                return ObscuraCaptureResult(imagePath: imagePath, videoPath: videoPath)
+            } catch {
+                if let micInput = (captureSession.inputs.first { $0.ports.contains { $0.sourceDeviceType == .builtInMicrophone } }) {
+                    captureSession.removeInput(micInput)
+                }
+                _isCapturing = false
+                throw error
             }
         }
+        .value
     }
     
     /// Captures a photo.
@@ -347,19 +347,18 @@ public final class ObscuraCamera: NSObject {
         photoSetting.photoQualityPrioritization = photoOutput.maxPhotoQualityPrioritization
 
         photoOutput.capturePhoto(with: photoSetting, delegate: self)
-        return try await withCheckedThrowingContinuation { continuation in
-            Task {
-                _isCapturing = true
-                do {
-                    let imagePath = try await withCheckedThrowingContinuation { [weak self] continuation in self?.photoContinuation = continuation }
-                    continuation.resume(returning: ObscuraCaptureResult(imagePath: imagePath, videoPath: nil))
-                    _isCapturing = false
-                } catch {
-                    continuation.resume(throwing: error)
-                    _isCapturing = false
-                }
+        return try await Task {
+            _isCapturing = true
+            do {
+                let imagePath = try await withCheckedThrowingContinuation { photoContinuation = $0 }
+                _isCapturing = false
+                return ObscuraCaptureResult(imagePath: imagePath, videoPath: nil)
+            } catch {
+                _isCapturing = false
+                throw error
             }
         }
+        .value
     }
     
     /// Stops camera session.
@@ -369,33 +368,33 @@ public final class ObscuraCamera: NSObject {
     
     /// Starts camera session.
     public func start() async {
-        guard !isRunning else { return }
+        guard _isRunning == false else { return }
         captureSession.startRunning()
     }
 }
 
 extension ObscuraCamera: AVCapturePhotoCaptureDelegate {
-    public func photoOutput(_ output: AVCapturePhotoOutput, didFinishProcessingPhoto photo: AVCapturePhoto, error: Error?) {
+    nonisolated public func photoOutput(_ output: AVCapturePhotoOutput, didFinishProcessingPhoto photo: AVCapturePhoto, error: Error?) {
         if let error {
-            photoContinuation?.resume(throwing: error)
+            Task { await photoContinuation?.resume(throwing: error) }
             return
         }
 
         guard let fileData = photo.fileDataRepresentation() else {
-            photoContinuation?.resume(throwing: Errors.failedToCapture)
+            Task { await photoContinuation?.resume(throwing: Errors.failedToCapture) }
             return
         }
         
         do {
             let outputFileURL = imageDirectory.appending(path: UUID().uuidString + ".jpeg")
             try fileData.write(to: outputFileURL, options: [.atomic, .completeFileProtection])
-            photoContinuation?.resume(returning: outputFileURL.relativePath)
+            Task { await photoContinuation?.resume(returning: outputFileURL.relativePath) }
         } catch {
-            photoContinuation?.resume(throwing: error)
+            Task { await photoContinuation?.resume(throwing: error) }
         }
     }
     
-    public func photoOutput(
+    nonisolated public func photoOutput(
         _ output: AVCapturePhotoOutput,
         didFinishProcessingLivePhotoToMovieFileAt outputFileURL: URL,
         duration: CMTime,
@@ -404,10 +403,10 @@ extension ObscuraCamera: AVCapturePhotoCaptureDelegate {
         error: Error?
     ) {
         if let error {
-            videoContinuation?.resume(throwing: error)
+            Task { await videoContinuation?.resume(throwing: error) }
             return
         }
-        videoContinuation?.resume(returning: outputFileURL.relativePath)
+        Task { await videoContinuation?.resume(returning: outputFileURL.relativePath) }
     }
 }
 

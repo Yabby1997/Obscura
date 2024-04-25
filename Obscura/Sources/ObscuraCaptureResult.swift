@@ -9,7 +9,7 @@
 import Foundation
 
 /// Capture result of ``ObscuraCamera``.
-public struct ObscuraCaptureResult {
+public struct ObscuraCaptureResult: Sendable {
     /// Relative path to image file from Home directory.
     public let imagePath: String
     /// Relative path to video file from Home directory.

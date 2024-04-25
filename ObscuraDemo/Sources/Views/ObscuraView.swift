@@ -122,6 +122,6 @@ struct ObscuraView<ViewModel>: View where ViewModel: ObscuraViewModelProtocol {
     }
 }
 
-#Preview {
-    ObscuraView(viewModel: AELDemoViewModel())
-}
+//#Preview {
+//    ObscuraView(viewModel: AELDemoViewModel())
+//}
