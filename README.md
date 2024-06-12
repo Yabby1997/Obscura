@@ -5,3 +5,4 @@
 * [v0.3.0](https://yabby1997.github.io/Obscura/0.3.0/documentation/obscura/)
 * [v0.4.0](https://yabby1997.github.io/Obscura/0.4.0/documentation/obscura/)
 * [v0.5.0](https://yabby1997.github.io/Obscura/0.5.0/documentation/obscura/)
+* [v0.6.0](https://yabby1997.github.io/Obscura/0.6.0/documentation/obscura/)
