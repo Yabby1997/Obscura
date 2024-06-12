@@ -10,7 +10,7 @@ import Combine
 import AVFoundation
 
 /// A class that wraps `AVCaptureDevice` and `AVCaptureSession` to provide a convenient interface for camera operations.
-public final actor ObscuraCamera: NSObject {
+public actor ObscuraCamera: NSObject {
     /// Errors that can occur while using ``ObscuraCamera``.
     public enum Errors: Error {
         /// Indicates that camera access is not authorized.
