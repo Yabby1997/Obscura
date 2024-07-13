@@ -32,21 +32,18 @@ public actor ObscuraCamera: NSObject {
     // MARK: - Private Properties
     
     private var _previewLayer: AVCaptureVideoPreviewLayer { previewLayer as! AVCaptureVideoPreviewLayer }
-    @Published private var _isRunning = false
-    @Published private var _maxZoomFactor: CGFloat = .infinity
-    @Published private var _isHDREnabled = false
-    @Published private var _iso: Float = .zero
-    @Published private var _shutterSpeed: Float = .zero
-    @Published private var _aperture: Float = .zero
-    @Published private var _exposureLockPoint: CGPoint?
-    @Published private var _focusLockPoint: CGPoint?
-    @Published private var _isExposureLocked: Bool = false
-    @Published private var _isFocusLocked: Bool = false
-    @Published private var _zoomFactor: CGFloat = 1
-    @Published private var _isCapturing = false
-    
-    private var photoContinuation: CheckedContinuation<String, Error>?
-    private var videoContinuation: CheckedContinuation<String, Error>?
+    private let _isRunning = CurrentValueSubject<Bool, Never>(false)
+    private let _maxZoomFactor = CurrentValueSubject<CGFloat, Never>(.infinity)
+    private let _isHDREnabled = CurrentValueSubject<Bool, Never>(false)
+    private let _iso = CurrentValueSubject<Float, Never>(.zero)
+    private let _shutterSpeed = CurrentValueSubject<Float, Never>(.zero)
+    private let _aperture = CurrentValueSubject<Float, Never>(.zero)
+    private let _exposureLockPoint = CurrentValueSubject<CGPoint?, Never>(nil)
+    private let _focusLockPoint = CurrentValueSubject<CGPoint?, Never>(nil)
+    private let _isExposureLocked = CurrentValueSubject<Bool, Never>(false)
+    private let _isFocusLocked = CurrentValueSubject<Bool, Never>(false)
+    private let _zoomFactor = CurrentValueSubject<CGFloat, Never>(1)
+    private let _isCapturing = CurrentValueSubject<Bool, Never>(false)
     
     private let imageDirectory = URL.homeDirectory.appending(path: "Documents/Obscura/Images")
     private let videoDirectory = URL.homeDirectory.appending(path: "Documents/Obscura/Videos")
@@ -57,29 +54,33 @@ public actor ObscuraCamera: NSObject {
     nonisolated public let previewLayer: CALayer
     
     /// A `Bool` value indicating whether the camera is running.
-    public var isRunning: AnyPublisher<Bool, Never> { $_isRunning.eraseToAnyPublisher() }
+    nonisolated public let isRunning: AnyPublisher<Bool, Never>
     /// A `CGFloat` value indicating the maximum zoom factor.
-    public var maxZoomFactor: AnyPublisher<CGFloat, Never> { $_maxZoomFactor.eraseToAnyPublisher() }
+    nonisolated public let maxZoomFactor: AnyPublisher<CGFloat, Never>
     /// A `Bool` value indicating whether the HDR mode is enabled.
-    public var isHDREnabled: AnyPublisher<Bool, Never> { $_isHDREnabled.eraseToAnyPublisher() }
+    nonisolated public let isHDREnabled: AnyPublisher<Bool, Never>
     /// The ISO value that the camera is currently using.
-    public var iso: AnyPublisher<Float, Never> { $_iso.eraseToAnyPublisher() }
+    nonisolated public let iso: AnyPublisher<Float, Never>
     /// The Shutter speed value that the camera is currently using.
-    public var shutterSpeed: AnyPublisher<Float, Never> { $_shutterSpeed.eraseToAnyPublisher() }
+    nonisolated public let shutterSpeed: AnyPublisher<Float, Never>
     /// The Aperture f-number value that the camera is currently using.
-    public var aperture: AnyPublisher<Float, Never> { $_aperture.eraseToAnyPublisher() }
+    nonisolated public let aperture: AnyPublisher<Float, Never>
     /// A `CGPoint` value indicating which point is being used for exposure lock.
-    public var exposureLockPoint: AnyPublisher<CGPoint?, Never> { $_exposureLockPoint.eraseToAnyPublisher() }
+    nonisolated public let exposureLockPoint: AnyPublisher<CGPoint?, Never>
     /// A `CGPoint` value indicating which point is being used for focus lock.
-    public var focusLockPoint: AnyPublisher<CGPoint?, Never> { $_focusLockPoint.eraseToAnyPublisher() }
+    nonisolated public let focusLockPoint: AnyPublisher<CGPoint?, Never>
     /// A `Bool` value indicating whether the exposure is locked.
-    public var isExposureLocked: AnyPublisher<Bool, Never> { $_isExposureLocked.eraseToAnyPublisher() }
+    nonisolated public let isExposureLocked: AnyPublisher<Bool, Never>
     /// A `Bool` value indicating whether the focus is locked.
-    public var isFocusLocked: AnyPublisher<Bool, Never> { $_isFocusLocked.eraseToAnyPublisher() }
+    nonisolated public let isFocusLocked: AnyPublisher<Bool, Never>
     /// A `CGFloat` value indicating the current zoom factor.
-    public var zoomFactor: AnyPublisher<CGFloat, Never> { $_zoomFactor.eraseToAnyPublisher() }
+    nonisolated public let zoomFactor: AnyPublisher<CGFloat, Never>
     /// A `Bool` value indicating the camera is currently capturing.
-    public var isCapturing: AnyPublisher<Bool, Never> { $_isCapturing.eraseToAnyPublisher() }
+    nonisolated public let isCapturing: AnyPublisher<Bool, Never>
+    
+    private var photoContinuation: CheckedContinuation<String, Error>?
+    private var videoContinuation: CheckedContinuation<String, Error>?
+    private var cancellables: Set<AnyCancellable> = []
     
     
     // MARK: - Initializers
@@ -89,6 +90,18 @@ public actor ObscuraCamera: NSObject {
     /// - Important: Ensure to call ``setup()`` before utilizing the camera features.
     public override init() {
         self.previewLayer = AVCaptureVideoPreviewLayer(session: captureSession)
+        self.isRunning = _isRunning.eraseToAnyPublisher()
+        self.maxZoomFactor = _maxZoomFactor.eraseToAnyPublisher()
+        self.isHDREnabled = _isHDREnabled.eraseToAnyPublisher()
+        self.iso = _iso.eraseToAnyPublisher()
+        self.shutterSpeed = _shutterSpeed.eraseToAnyPublisher()
+        self.aperture = _aperture.eraseToAnyPublisher()
+        self.exposureLockPoint = _exposureLockPoint.eraseToAnyPublisher()
+        self.focusLockPoint = _focusLockPoint.eraseToAnyPublisher()
+        self.isExposureLocked = _isExposureLocked.eraseToAnyPublisher()
+        self.isFocusLocked = _isFocusLocked.eraseToAnyPublisher()
+        self.zoomFactor = _zoomFactor.eraseToAnyPublisher()
+        self.isCapturing = _isCapturing.eraseToAnyPublisher()
         super.init()
     }
     
@@ -130,44 +143,55 @@ public actor ObscuraCamera: NSObject {
         self.camera = camera
         
         captureSession.publisher(for: \.isRunning)
-            .assign(to: &$_isRunning)
+            .assign(to: \.value, on: _isRunning)
+            .store(in: &cancellables)
         
         camera.publisher(for: \.isVideoHDREnabled)
-            .assign(to: &$_isHDREnabled)
+            .assign(to: \.value, on: _isHDREnabled)
+            .store(in: &cancellables)
         
         camera.publisher(for: \.maxAvailableVideoZoomFactor)
-            .assign(to: &$_maxZoomFactor)
+            .assign(to: \.value, on: _maxZoomFactor)
+            .store(in: &cancellables)
         
         camera.publisher(for: \.videoZoomFactor)
-            .assign(to: &$_zoomFactor)
+            .assign(to: \.value, on: _zoomFactor)
+            .store(in: &cancellables)
         
         camera.publisher(for: \.iso)
-            .assign(to: &$_iso)
+            .assign(to: \.value, on: _iso)
+            .store(in: &cancellables)
         
         camera.publisher(for: \.exposureDuration)
             .map { Float($0.seconds) }
-            .assign(to: &$_shutterSpeed)
+            .assign(to: \.value, on: _shutterSpeed)
+            .store(in: &cancellables)
         
         camera.publisher(for: \.lensAperture)
-            .assign(to: &$_aperture)
+            .assign(to: \.value, on: _aperture)
+            .store(in: &cancellables)
         
         camera.publisher(for: \.exposureMode)
             .map { $0 == .locked }
-            .assign(to: &$_isExposureLocked)
+            .assign(to: \.value, on: _isExposureLocked)
+            .store(in: &cancellables)
         
         camera.publisher(for: \.focusMode)
             .map { $0 == .locked }
-            .assign(to: &$_isFocusLocked)
+            .assign(to: \.value, on: _isFocusLocked)
+            .store(in: &cancellables)
         
         camera.publisher(for: \.exposurePointOfInterest)
             .dropFirst()
             .map(convert)
-            .assign(to: &$_exposureLockPoint)
+            .assign(to: \.value, on: _exposureLockPoint)
+            .store(in: &cancellables)
         
         camera.publisher(for: \.focusPointOfInterest)
             .dropFirst()
             .map(convert)
-            .assign(to: &$_focusLockPoint)
+            .assign(to: \.value, on: _focusLockPoint)
+            .store(in: &cancellables)
         
         guard captureSession.canAddOutput(photoOutput) else { return }
         captureSession.addOutput(photoOutput)
@@ -207,7 +231,7 @@ public actor ObscuraCamera: NSObject {
     public func zoom(factor: CGFloat) throws {
         guard let camera else { throw Errors.setupRequired }
         try camera.lockForConfiguration()
-        camera.ramp(toVideoZoomFactor: min(factor, _maxZoomFactor), withRate: 30)
+        camera.ramp(toVideoZoomFactor: min(factor, _maxZoomFactor.value), withRate: 30)
         camera.unlockForConfiguration()
     }
     
@@ -235,7 +259,7 @@ public actor ObscuraCamera: NSObject {
     public func lockExposure(on point: CGPoint) throws {
         guard let camera else { throw Errors.setupRequired }
         guard camera.isExposurePointOfInterestSupported else { throw Errors.notSupported }
-        _exposureLockPoint = nil
+        _exposureLockPoint.send(nil)
         try camera.lockForConfiguration()
         let pointOfInterest = _previewLayer.captureDevicePointConverted(fromLayerPoint: point)
         camera.exposurePointOfInterest = pointOfInterest
@@ -252,7 +276,7 @@ public actor ObscuraCamera: NSObject {
         camera.exposurePointOfInterest = pointOfInterest
         camera.exposureMode = .continuousAutoExposure
         camera.unlockForConfiguration()
-        _exposureLockPoint = nil
+        _exposureLockPoint.send(nil)
     }
     
     /// Locks the focus on certain point.
@@ -264,7 +288,7 @@ public actor ObscuraCamera: NSObject {
     public func lockFocus(on point: CGPoint) throws {
         guard let camera else { throw Errors.setupRequired }
         guard camera.isFocusPointOfInterestSupported else { throw Errors.notSupported }
-        _focusLockPoint = nil
+        _focusLockPoint.send(nil)
         try camera.lockForConfiguration()
         let pointOfInterest = _previewLayer.captureDevicePointConverted(fromLayerPoint: point)
         camera.focusPointOfInterest = pointOfInterest
@@ -281,7 +305,7 @@ public actor ObscuraCamera: NSObject {
         camera.focusPointOfInterest = pointOfInterest
         camera.focusMode = .continuousAutoFocus
         camera.unlockForConfiguration()
-        _focusLockPoint = nil
+        _focusLockPoint.send(nil)
     }
     
     /// Captures a LivePhoto.
@@ -294,7 +318,7 @@ public actor ObscuraCamera: NSObject {
     /// - Returns: An ``ObscuraCaptureResult`` containing image and video URLs that can be combined into a LivePhoto in the app sandbox.
     /// - Throws: Errors that might occur while capturing LivePhoto.
     public func captureLivePhoto() async throws -> ObscuraCaptureResult? {
-        guard !_isCapturing else { return nil }
+        guard !_isCapturing.value else { return nil }
         
         let photoSetting = AVCapturePhotoSettings(
             format:  [
@@ -313,20 +337,20 @@ public actor ObscuraCamera: NSObject {
 
         photoOutput.capturePhoto(with: photoSetting, delegate: self)
         return try await Task {
-            _isCapturing = true
+            _isCapturing.send(true)
             do {
                 let imagePath = try await withCheckedThrowingContinuation { photoContinuation = $0 }
                 let videoPath = try await withCheckedThrowingContinuation { videoContinuation = $0 }
                 if let micInput = (captureSession.inputs.first { $0.ports.contains { $0.sourceDeviceType == .builtInMicrophone } }) {
                     captureSession.removeInput(micInput)
                 }
-                _isCapturing = false
+                _isCapturing.send(false)
                 return ObscuraCaptureResult(imagePath: imagePath, videoPath: videoPath)
             } catch {
                 if let micInput = (captureSession.inputs.first { $0.ports.contains { $0.sourceDeviceType == .builtInMicrophone } }) {
                     captureSession.removeInput(micInput)
                 }
-                _isCapturing = false
+                _isCapturing.send(false)
                 throw error
             }
         }
@@ -341,20 +365,20 @@ public actor ObscuraCamera: NSObject {
     /// - Returns: An ``ObscuraCaptureResult`` containing the image URL in the app sandbox.
     /// - Throws: Errors that might occur while capturing the photo.
     public func capturePhoto() async throws -> ObscuraCaptureResult? {
-        guard !_isCapturing else { return nil }
+        guard !_isCapturing.value else { return nil }
         
         let photoSetting = AVCapturePhotoSettings(format:  [AVVideoCodecKey: AVVideoCodecType.hevc])
         photoSetting.photoQualityPrioritization = photoOutput.maxPhotoQualityPrioritization
 
         photoOutput.capturePhoto(with: photoSetting, delegate: self)
         return try await Task {
-            _isCapturing = true
+            _isCapturing.send(true)
             do {
                 let imagePath = try await withCheckedThrowingContinuation { photoContinuation = $0 }
-                _isCapturing = false
+                _isCapturing.send(false)
                 return ObscuraCaptureResult(imagePath: imagePath, videoPath: nil)
             } catch {
-                _isCapturing = false
+                _isCapturing.send(false)
                 throw error
             }
         }
@@ -368,7 +392,7 @@ public actor ObscuraCamera: NSObject {
     
     /// Starts camera session.
     public func start() async {
-        guard _isRunning == false else { return }
+        guard _isRunning.value == false else { return }
         captureSession.startRunning()
     }
 }

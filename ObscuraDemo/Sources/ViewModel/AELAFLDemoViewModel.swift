@@ -33,57 +33,51 @@ final class AELAFLDemoViewModel: ObscuraViewModelProtocol {
     }
     
     private func bind() {
-        Task {
-            await obscuraCamera.isRunning
-                .receive(on: DispatchQueue.main)
-                .assign(to: &$isRunning)
-            
-            await obscuraCamera.maxZoomFactor
-                .receive(on: DispatchQueue.main)
-                .assign(to: &$maxZoomFactor)
-            
-            await obscuraCamera.iso
-                .receive(on: DispatchQueue.main)
-                .assign(to: &$iso)
-            
-            await obscuraCamera.shutterSpeed
-                .receive(on: DispatchQueue.main)
-                .assign(to: &$shutterSpeed)
-            
-            await obscuraCamera.aperture
-                .receive(on: DispatchQueue.main)
-                .assign(to: &$aperture)
-            
-            let focusLockPoint = await obscuraCamera.focusLockPoint
-            let exposureLockPoint = await obscuraCamera.exposureLockPoint
-            focusLockPoint.combineLatest(exposureLockPoint)
-                .filter { $0 == $1 }
-                .map { $0.0 }
-                .receive(on: DispatchQueue.main)
-                .assign(to: &$lockPoint)
-            
-            let isFocusLocked = await obscuraCamera.isFocusLocked
-            let isExposureLocked = await obscuraCamera.isExposureLocked
-            isFocusLocked.combineLatest(isExposureLocked)
-                .map { $0 == $1 && $0 }
-                .receive(on: DispatchQueue.main)
-                .assign(to: &$isLocked)
-            
-            await obscuraCamera.isFocusLocked
-                .debounce(for: .seconds(1.5), scheduler: DispatchQueue.main)
-                .filter { $0 }
-                .map { _ in nil }
-                .receive(on: DispatchQueue.main)
-                .assign(to: &$lockPoint)
-            
-            await obscuraCamera.isHDREnabled
-                .receive(on: DispatchQueue.main)
-                .assign(to: &$isHDREnabled)
-            
-            await obscuraCamera.zoomFactor
-                .receive(on: DispatchQueue.main)
-                .assign(to: &$zoomFactor)
-        }
+        obscuraCamera.isRunning
+            .receive(on: DispatchQueue.main)
+            .assign(to: &$isRunning)
+        
+        obscuraCamera.maxZoomFactor
+            .receive(on: DispatchQueue.main)
+            .assign(to: &$maxZoomFactor)
+        
+        obscuraCamera.iso
+            .receive(on: DispatchQueue.main)
+            .assign(to: &$iso)
+        
+        obscuraCamera.shutterSpeed
+            .receive(on: DispatchQueue.main)
+            .assign(to: &$shutterSpeed)
+        
+        obscuraCamera.aperture
+            .receive(on: DispatchQueue.main)
+            .assign(to: &$aperture)
+        
+        obscuraCamera.focusLockPoint.combineLatest(obscuraCamera.exposureLockPoint)
+            .filter { $0 == $1 }
+            .map { $0.0 }
+            .receive(on: DispatchQueue.main)
+            .assign(to: &$lockPoint)
+        
+        obscuraCamera.isFocusLocked.combineLatest(obscuraCamera.isExposureLocked)
+            .map { $0 == $1 && $0 }
+            .receive(on: DispatchQueue.main)
+            .assign(to: &$isLocked)
+        
+        obscuraCamera.isFocusLocked
+            .debounce(for: .seconds(1.5), scheduler: DispatchQueue.main)
+            .filter { $0 }
+            .map { _ in nil }
+            .receive(on: DispatchQueue.main)
+            .assign(to: &$lockPoint)
+        
+        obscuraCamera.isHDREnabled
+            .receive(on: DispatchQueue.main)
+            .assign(to: &$isHDREnabled)
+        
+        obscuraCamera.zoomFactor
+            .receive(on: DispatchQueue.main)
+            .assign(to: &$zoomFactor)
     }
     
     func setupIfNeeded() {
