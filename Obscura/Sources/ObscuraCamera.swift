@@ -33,6 +33,7 @@ public actor ObscuraCamera: NSObject {
     
     private var _previewLayer: AVCaptureVideoPreviewLayer { previewLayer as! AVCaptureVideoPreviewLayer }
     private let _isRunning = CurrentValueSubject<Bool, Never>(false)
+    private let _minZoomFactor = CurrentValueSubject<CGFloat, Never>(.zero)
     private let _maxZoomFactor = CurrentValueSubject<CGFloat, Never>(.infinity)
     private let _isHDREnabled = CurrentValueSubject<Bool, Never>(false)
     private let _iso = CurrentValueSubject<Float, Never>(.zero)
@@ -55,6 +56,8 @@ public actor ObscuraCamera: NSObject {
     
     /// A `Bool` value indicating whether the camera is running.
     nonisolated public let isRunning: AnyPublisher<Bool, Never>
+    /// A `CGFloat` value indicating the mimimum zoom factor.
+    nonisolated public let minZoomFactor: AnyPublisher<CGFloat, Never>
     /// A `CGFloat` value indicating the maximum zoom factor.
     nonisolated public let maxZoomFactor: AnyPublisher<CGFloat, Never>
     /// A `Bool` value indicating whether the HDR mode is enabled.
@@ -80,8 +83,8 @@ public actor ObscuraCamera: NSObject {
     
     private var photoContinuation: CheckedContinuation<String, Error>?
     private var videoContinuation: CheckedContinuation<String, Error>?
+    private var zoomTask: Task<Void, Error>?
     private var cancellables: Set<AnyCancellable> = []
-    
     
     // MARK: - Initializers
     
@@ -91,6 +94,7 @@ public actor ObscuraCamera: NSObject {
     public override init() {
         self.previewLayer = AVCaptureVideoPreviewLayer(session: captureSession)
         self.isRunning = _isRunning.eraseToAnyPublisher()
+        self.minZoomFactor = _minZoomFactor.eraseToAnyPublisher()
         self.maxZoomFactor = _maxZoomFactor.eraseToAnyPublisher()
         self.isHDREnabled = _isHDREnabled.eraseToAnyPublisher()
         self.iso = _iso.eraseToAnyPublisher()
@@ -148,6 +152,10 @@ public actor ObscuraCamera: NSObject {
         
         camera.publisher(for: \.isVideoHDREnabled)
             .assign(to: \.value, on: _isHDREnabled)
+            .store(in: &cancellables)
+        
+        camera.publisher(for: \.minAvailableVideoZoomFactor)
+            .assign(to: \.value, on: _minZoomFactor)
             .store(in: &cancellables)
         
         camera.publisher(for: \.maxAvailableVideoZoomFactor)
@@ -228,10 +236,21 @@ public actor ObscuraCamera: NSObject {
     ///
     /// - Parameters:
     ///     - factor: The zoom factor.
-    public func zoom(factor: CGFloat) throws {
+    public func zoom(factor: CGFloat) async throws {
+        let correctedFactor = max(_minZoomFactor.value, min(factor, _maxZoomFactor.value))
+        zoomTask?.cancel()
+        zoomTask = Task { [weak self] in
+            try await Task.sleep(nanoseconds: 100_000_000)
+            guard !Task.isCancelled else { return }
+            try await self?.zoomWithRamping(factor: correctedFactor)
+        }
+        try await zoomTask?.value
+    }
+    
+    private func zoomWithRamping(factor: CGFloat) throws {
         guard let camera else { throw Errors.setupRequired }
         try camera.lockForConfiguration()
-        camera.ramp(toVideoZoomFactor: min(factor, _maxZoomFactor.value), withRate: 30)
+        camera.ramp(toVideoZoomFactor: factor, withRate: 30)
         camera.unlockForConfiguration()
     }
     
