@@ -6,7 +6,7 @@
 //  Copyright © 2023 seunghun. All rights reserved.
 //
 
-import Combine
+@preconcurrency import Combine
 import AVFoundation
 
 /// A class that wraps `AVCaptureDevice` and `AVCaptureSession` to provide a convenient interface for camera operations.
@@ -45,6 +45,7 @@ public actor ObscuraCamera: NSObject {
     private let _isFocusLocked = CurrentValueSubject<Bool, Never>(false)
     private let _zoomFactor = CurrentValueSubject<CGFloat, Never>(1)
     private let _isCapturing = CurrentValueSubject<Bool, Never>(false)
+    private let _isMuted = CurrentValueSubject<Bool, Never>(false)
     
     private let imageDirectory = URL.homeDirectory.appending(path: "Documents/Obscura/Images")
     private let videoDirectory = URL.homeDirectory.appending(path: "Documents/Obscura/Videos")
@@ -80,6 +81,8 @@ public actor ObscuraCamera: NSObject {
     nonisolated public let zoomFactor: AnyPublisher<CGFloat, Never>
     /// A `Bool` value indicating the camera is currently capturing.
     nonisolated public let isCapturing: AnyPublisher<Bool, Never>
+    /// A `Bool` value indicating the camera is muted.
+    nonisolated public let isMuted: AnyPublisher<Bool, Never>
     
     private var photoContinuation: CheckedContinuation<String, Error>?
     private var videoContinuation: CheckedContinuation<String, Error>?
@@ -106,6 +109,7 @@ public actor ObscuraCamera: NSObject {
         self.isFocusLocked = _isFocusLocked.eraseToAnyPublisher()
         self.zoomFactor = _zoomFactor.eraseToAnyPublisher()
         self.isCapturing = _isCapturing.eraseToAnyPublisher()
+        self.isMuted = _isMuted.removeDuplicates().eraseToAnyPublisher()
         super.init()
     }
     
@@ -269,6 +273,14 @@ public actor ObscuraCamera: NSObject {
         camera.unlockForConfiguration()
     }
     
+    /// Sets the mute status.
+    ///
+    /// - Parameters:
+    ///     - isMuted: The mute state to be set.
+    public func setMute(_ isMuted: Bool) {
+        _isMuted.send(isMuted)
+    }
+    
     /// Locks the exposure on certain point.
     ///
     /// - Note: Unlock the exposure using ``unlockExposure()``
@@ -417,6 +429,26 @@ public actor ObscuraCamera: NSObject {
 }
 
 extension ObscuraCamera: AVCapturePhotoCaptureDelegate {
+    nonisolated public func photoOutput(
+        _ output: AVCapturePhotoOutput,
+        willCapturePhotoFor resolvedSettings: AVCaptureResolvedPhotoSettings
+    ) {
+        Task {
+            guard await _isMuted.value else { return }
+            AudioServicesDisposeSystemSoundID(1108)
+        }
+    }
+    
+    nonisolated public func photoOutput(
+        _ output: AVCapturePhotoOutput,
+        didCapturePhotoFor resolvedSettings: AVCaptureResolvedPhotoSettings
+    ) {
+        Task {
+            guard await _isMuted.value else { return }
+            AudioServicesDisposeSystemSoundID(1108)
+        }
+    }
+    
     nonisolated public func photoOutput(_ output: AVCapturePhotoOutput, didFinishProcessingPhoto photo: AVCapturePhoto, error: Error?) {
         if let error {
             Task { await photoContinuation?.resume(throwing: error) }
