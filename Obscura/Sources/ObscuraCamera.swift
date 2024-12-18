@@ -357,6 +357,37 @@ public actor ObscuraCamera: NSObject {
         _focusLockPoint.send(nil)
     }
     
+    /// Locks the frame rate.
+    ///
+    /// Call this method to lock frame rate of the ``ObscuraCamera``.
+    /// To unlock, call ``unlockFrameRate()``.
+    ///
+    /// - Note: Locking the frame rate affects in preview, Live Photo result and video result.
+    ///
+    /// - Parameters:
+    ///     - frameRate: The desired frame rate.
+    public func lockFrameRate(_ frameRate: Int32) throws {
+        guard let camera else { throw Errors.setupRequired }
+        guard let minimum = (camera.activeFormat.videoSupportedFrameRateRanges.map { $0.minFrameRate }.max()),
+              let maximum = (camera.activeFormat.videoSupportedFrameRateRanges.map { $0.maxFrameRate }.min()),
+              Int32(ceil(minimum))...Int32(floor(maximum)) ~= frameRate else { throw Errors.notSupported }
+        try camera.lockForConfiguration()
+        let frameDuration = CMTime(value: 1, timescale: frameRate)
+        camera.activeVideoMinFrameDuration = frameDuration
+        camera.activeVideoMaxFrameDuration = frameDuration
+        camera.unlockForConfiguration()
+        try camera.lockForConfiguration()
+    }
+    
+    /// Unlocks the frame rate.
+    public func unlockFrameRate() throws {
+        guard let camera else { throw Errors.setupRequired }
+        try camera.lockForConfiguration()
+        camera.activeVideoMinFrameDuration = CMTime.invalid
+        camera.activeVideoMaxFrameDuration = CMTime.invalid
+        camera.unlockForConfiguration()
+    }
+    
     /// Captures a LivePhoto.
     ///
     /// Call this method to capture a LivePhoto with ``ObscuraCamera``.
@@ -443,20 +474,12 @@ public actor ObscuraCamera: NSObject {
     /// - SeeAlso: ``requestMicAuthorization()``
     /// - Returns: An ``ObscuraCaptureResult`` containing image and video URLs that can be combined into a LivePhoto in the app sandbox.
     /// - Throws: Errors that might occur starting video record.
-    public func startRecord(with frameRate: Int32) throws {
+    public func startRecord() throws {
         guard let camera else { throw Errors.setupRequired }
         
         let recordOutput = AVCaptureMovieFileOutput()
         guard captureSession.canAddOutput(recordOutput) else { throw Errors.notSupported }
         captureSession.addOutput(recordOutput)
-        
-        try camera.lockForConfiguration()
-        
-        let frameDuration = CMTime(value: 1, timescale: frameRate)
-        camera.activeVideoMinFrameDuration = frameDuration
-        camera.activeVideoMaxFrameDuration = frameDuration
-        
-        camera.unlockForConfiguration()
         
         if let mic = AVCaptureDevice.default(for: .audio),
            let micInput = try? AVCaptureDeviceInput(device: mic),
@@ -480,6 +503,10 @@ public actor ObscuraCamera: NSObject {
         guard let recordOutput, recordOutput.isRecording else { return nil }
         recordOutput.stopRecording()
         let videoPath = try await withCheckedThrowingContinuation { videoContinuation = $0 }
+        captureSession.removeOutput(recordOutput)
+        if let micInput = (captureSession.inputs.first { $0.ports.contains { $0.sourceDeviceType == .builtInMicrophone } }) {
+            captureSession.removeInput(micInput)
+        }
         _isCapturing.send(false)
         return ObscuraCaptureResult(imagePath: nil, videoPath: videoPath)
     }
