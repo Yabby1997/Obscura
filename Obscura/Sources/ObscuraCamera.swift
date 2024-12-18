@@ -113,6 +113,8 @@ public actor ObscuraCamera: NSObject {
         super.init()
     }
     
+    // MARK: - Private methods
+    
     private func createDirectoryIfNeeded(for path: String) throws {
         if FileManager.default.fileExists(atPath: path) {
             print("Directory Exists: \(path)")
@@ -124,6 +126,10 @@ public actor ObscuraCamera: NSObject {
             attributes: nil
         )
         print("Directory Created: \(path)")
+    }
+    
+    private func convert(point: CGPoint) -> CGPoint {
+        _previewLayer.layerPointConverted(fromCaptureDevicePoint: point)
     }
     
     // MARK: - Public Methods
@@ -184,7 +190,7 @@ public actor ObscuraCamera: NSObject {
             .store(in: &cancellables)
         
         camera.publisher(for: \.exposureMode)
-            .map { $0 == .locked }
+            .map { $0 == .locked || $0 == .custom }
             .assign(to: \.value, on: _isExposureLocked)
             .store(in: &cancellables)
         
@@ -219,10 +225,6 @@ public actor ObscuraCamera: NSObject {
         captureSession.startRunning()
     }
     
-    private func convert(point: CGPoint) -> CGPoint {
-        _previewLayer.layerPointConverted(fromCaptureDevicePoint: point)
-    }
-    
     /// Requests microphone usage authorization for ``ObscuraCamera``.
     ///
     /// Call this method along with ``setup()`` if audio recording is required for LivePhoto or video capture features.
@@ -235,7 +237,18 @@ public actor ObscuraCamera: NSObject {
             throw Errors.notAuthorized
         }
     }
-
+    
+    /// Starts camera session.
+    public func start() async {
+        guard _isRunning.value == false else { return }
+        captureSession.startRunning()
+    }
+    
+    /// Stops camera session.
+    public func stop() async {
+        captureSession.stopRunning()
+    }
+    
     /// Sets the zoom factor.
     ///
     /// - Parameters:
@@ -295,6 +308,21 @@ public actor ObscuraCamera: NSObject {
         let pointOfInterest = _previewLayer.captureDevicePointConverted(fromLayerPoint: point)
         camera.exposurePointOfInterest = pointOfInterest
         camera.exposureMode = .autoExpose
+        camera.unlockForConfiguration()
+    }
+    
+    /// Locks the exposure for given shutter speed and ISO.
+    ///
+    /// - Note: Unlock the exposure using ``unlockExposure()``
+    ///
+    /// - Paramters:
+    ///     - shutterSpeed: The shutter speed to lock exposure. Provide `nil` to leave it unchaged. Default value is `nil`.
+    ///     - iso: The ISO value to lock exposure. Provide `nil` to leave it unchanged. Default value is `nil`.
+    public func lockExposure(shutterSpeed: CMTime? = nil, iso: Float? = nil) throws {
+        guard let camera else { return }
+        try camera.lockForConfiguration()
+        camera.exposureMode = .custom
+        camera.setExposureModeCustom(duration: shutterSpeed ?? AVCaptureDevice.currentExposureDuration, iso: iso ?? camera.iso)
         camera.unlockForConfiguration()
     }
     
