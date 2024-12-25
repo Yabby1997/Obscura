@@ -10,7 +10,7 @@
 import AVFoundation
 
 /// A class that wraps `AVCaptureDevice` and `AVCaptureSession` to provide a convenient interface for camera operations.
-public actor ObscuraCamera: NSObject {
+public final class ObscuraCamera: NSObject {
     /// Errors that can occur while using ``ObscuraCamera``.
     public enum Errors: Error {
         /// Indicates that camera access is not authorized.
@@ -29,6 +29,10 @@ public actor ObscuraCamera: NSObject {
     private let captureSession = AVCaptureSession()
     private let photoOutput =  AVCapturePhotoOutput()
     private var recordOutput: AVCaptureMovieFileOutput?
+    private var obscuraRecorder: ObscuraRecordable?
+    private var videoDataOutput: AVCaptureVideoDataOutput?
+    private var audioDataOutput: AVCaptureAudioDataOutput?
+    private let sampleBufferDelegateQueue = DispatchQueue(label: "ObscuraCamera.SampleBufferDelegateQueue")
     
     // MARK: - Private Properties
     
@@ -54,7 +58,7 @@ public actor ObscuraCamera: NSObject {
     // MARK: - Public Properties
     
     /// The layer that camera feed will be rendered on.
-    nonisolated public let previewLayer: CALayer
+    public let previewLayer: CALayer
     
     /// A `Bool` value indicating whether the camera is running.
     nonisolated public let isRunning: AnyPublisher<Bool, Never>
@@ -143,6 +147,7 @@ public actor ObscuraCamera: NSObject {
     ///
     /// - Important: If it throws an authorization error, ``Errors/notAuthorized``, you must guide your user to manually grant authorization to use the camera and then call this method to try again.
     /// - Note: The LivePhoto and video capture features require microphone usage authorization as well. However, unlike the camera, microphone usage is not mandatory and is omitted in this method. To request microphone usage authorization, call ``requestMicAuthorization()``.
+    @ObscuraGlobalActor
     public func setup() async throws {
         try createDirectoryIfNeeded(for: imageDirectory.path)
         try createDirectoryIfNeeded(for: videoDirectory.path)
@@ -233,6 +238,7 @@ public actor ObscuraCamera: NSObject {
     /// - Note: Although it may fail to acquire authorization, LivePhoto and video will be captured without audio recording.
     ///
     /// - Throws: An error of type ``Errors`` indicating failure to acquire microphone usage authorization.
+    @ObscuraGlobalActor
     public func requestMicAuthorization() async throws {
         guard await AVCaptureDevice.requestAccess(for: .audio) else {
             throw Errors.notAuthorized
@@ -240,12 +246,14 @@ public actor ObscuraCamera: NSObject {
     }
     
     /// Starts camera session.
+    @ObscuraGlobalActor
     public func start() async {
         guard _isRunning.value == false else { return }
         captureSession.startRunning()
     }
     
     /// Stops camera session.
+    @ObscuraGlobalActor
     public func stop() async {
         captureSession.stopRunning()
     }
@@ -254,6 +262,7 @@ public actor ObscuraCamera: NSObject {
     ///
     /// - Parameters:
     ///     - factor: The zoom factor.
+    @ObscuraGlobalActor
     public func zoom(factor: CGFloat) async throws {
         guard let camera else { throw Errors.setupRequired }
         try camera.lockForConfiguration()
@@ -308,11 +317,19 @@ public actor ObscuraCamera: NSObject {
     /// - Paramters:
     ///     - shutterSpeed: The shutter speed to lock exposure. Provide `nil` to leave it unchaged. Default value is `nil`.
     ///     - iso: The ISO value to lock exposure. Provide `nil` to leave it unchanged. Default value is `nil`.
-    public func lockExposure(shutterSpeed: CMTime? = nil, iso: Float? = nil) throws {
+    @ObscuraGlobalActor
+    public func lockExposure(shutterSpeed: CMTime? = nil, iso: Float? = nil) async throws {
         guard let camera else { return }
         try camera.lockForConfiguration()
         camera.exposureMode = .custom
-        camera.setExposureModeCustom(duration: shutterSpeed ?? AVCaptureDevice.currentExposureDuration, iso: iso ?? camera.iso)
+        await withCheckedContinuation { continuation in
+            camera.setExposureModeCustom(
+                duration: shutterSpeed.map { max(min($0, camera.activeFormat.maxExposureDuration), camera.activeFormat.minExposureDuration) } ?? AVCaptureDevice.currentExposureDuration,
+                iso: iso.map { min(max($0, camera.activeFormat.minISO), camera.activeFormat.maxISO) } ?? AVCaptureDevice.currentISO
+            ) { _ in
+                continuation.resume()
+            }
+        }
         camera.unlockForConfiguration()
     }
     
@@ -397,6 +414,7 @@ public actor ObscuraCamera: NSObject {
     /// - SeeAlso: ``requestMicAuthorization()``
     /// - Returns: An ``ObscuraCaptureResult`` containing image and video URLs that can be combined into a LivePhoto in the app sandbox.
     /// - Throws: Errors that might occur while capturing LivePhoto.
+    @ObscuraGlobalActor
     public func captureLivePhoto() async throws -> ObscuraCaptureResult? {
         guard !_isCapturing.value else { return nil }
         
@@ -444,6 +462,7 @@ public actor ObscuraCamera: NSObject {
     /// - Important: Returns `nil` if the camera is currently busy with a previous capture request.
     /// - Returns: An ``ObscuraCaptureResult`` containing the image URL in the app sandbox.
     /// - Throws: Errors that might occur while capturing the photo.
+    @ObscuraGlobalActor
     public func capturePhoto() async throws -> ObscuraCaptureResult? {
         guard !_isCapturing.value else { return nil }
         
@@ -470,22 +489,18 @@ public actor ObscuraCamera: NSObject {
     /// Call this method to start recording a video with ``ObscuraCamera``.
     /// To stop, call ``stopRecord()``.
     ///
-    /// - Note: If microphone usage authorization is not granted, the captured video won't have audio.
-    /// - SeeAlso: ``requestMicAuthorization()``
-    /// - Returns: An ``ObscuraCaptureResult`` containing image and video URLs that can be combined into a LivePhoto in the app sandbox.
+    /// - Note: If microphone usage authorization is not granted, the captured video won't have audio. Call ``requestMicAuthorization()`` to request access.
     /// - Throws: Errors that might occur starting video record.
-    public func startRecord() throws {
-        guard let camera else { throw Errors.setupRequired }
-        
-        let recordOutput = AVCaptureMovieFileOutput()
-        guard captureSession.canAddOutput(recordOutput) else { throw Errors.notSupported }
-        captureSession.addOutput(recordOutput)
-        
+    public func startRecordVideo() throws {
         if let mic = AVCaptureDevice.default(for: .audio),
            let micInput = try? AVCaptureDeviceInput(device: mic),
            captureSession.canAddInput(micInput) {
             captureSession.addInput(micInput)
         }
+        
+        let recordOutput = AVCaptureMovieFileOutput()
+        guard captureSession.canAddOutput(recordOutput) else { throw Errors.notSupported }
+        captureSession.addOutput(recordOutput)
 
         _isCapturing.send(true)
         recordOutput.startRecording(to: videoDirectory.appending(path: UUID().uuidString + ".mov"), recordingDelegate: self)
@@ -499,7 +514,8 @@ public actor ObscuraCamera: NSObject {
     /// - Important: Returns `nil` if the camera is not recording video.
     /// - Returns: An ``ObscuraCaptureResult`` containing the video URL in the app sandbox.
     /// - Throws: Errors that might occur stopping video record.
-    public func stopRecord() async throws -> ObscuraCaptureResult? {
+    @ObscuraGlobalActor
+    public func stopRecordVideo() async throws -> ObscuraCaptureResult? {
         guard let recordOutput, recordOutput.isRecording else { return nil }
         recordOutput.stopRecording()
         let videoPath = try await withCheckedThrowingContinuation { videoContinuation = $0 }
@@ -510,50 +526,105 @@ public actor ObscuraCamera: NSObject {
         _isCapturing.send(false)
         return ObscuraCaptureResult(imagePath: nil, videoPath: videoPath)
     }
+    
+    /// Starts video recording with custom recorder.
+    ///
+    /// Call this method to start recording a video with ``ObscuraRecordable``.
+    /// To stop, call ``stopObscuraRecorder()``.
+    ///
+    /// - Note: If microphone usage authorization is not granted, the captured video won't have audio. Call ``requestMicAuthorization()`` to request access.
+    /// - Parameters:
+    ///     - obscuraRecorder: A custom implementation of ``ObscuraRecordable`` that defines how video and audio will be recorded.
+    /// - Throws: Errors that might occur starting video record.
+    @ObscuraGlobalActor
+    public func start(obscuraRecorder: ObscuraRecordable) async throws {
+        if let mic = AVCaptureDevice.default(for: .audio),
+           let micInput = try? AVCaptureDeviceInput(device: mic),
+           captureSession.canAddInput(micInput) {
+            captureSession.addInput(micInput)
+        }
+        
+        let videoDataOutput = AVCaptureVideoDataOutput()
+        videoDataOutput.setSampleBufferDelegate(self, queue: sampleBufferDelegateQueue)
+        guard captureSession.canAddOutput(videoDataOutput) else { throw Errors.notSupported }
+        captureSession.addOutput(videoDataOutput)
+        
+        let audioDataOutput = AVCaptureAudioDataOutput()
+        audioDataOutput.setSampleBufferDelegate(self, queue: sampleBufferDelegateQueue)
+        guard captureSession.canAddOutput(audioDataOutput) else { throw Errors.notSupported }
+        captureSession.addOutput(audioDataOutput)
+        
+        self.obscuraRecorder = obscuraRecorder
+        self.videoDataOutput = videoDataOutput
+        self.audioDataOutput = audioDataOutput
+        
+        await obscuraRecorder.prepareForStart()
+        _isCapturing.send(true)
+    }
+    
+    /// Stops video recording with custom recorder.
+    ///
+    /// Call this method to stop recording video with ``ObscuraRecordable``.
+    ///
+    /// - Throws: Errors that might occur stopping video record.
+    @ObscuraGlobalActor
+    public func stopObscuraRecorder() async throws {
+        guard let obscuraRecorder, let videoDataOutput, let audioDataOutput, _isCapturing.value else { return }
+        
+        await obscuraRecorder.prepareForStop()
+        
+        captureSession.removeOutput(videoDataOutput)
+        captureSession.removeOutput(audioDataOutput)
+        
+        if let micInput = (captureSession.inputs.first { $0.ports.contains { $0.sourceDeviceType == .builtInMicrophone } }) {
+            captureSession.removeInput(micInput)
+        }
+        
+        self.obscuraRecorder = nil
+        self.videoDataOutput = nil
+        self.audioDataOutput = nil
+        _isCapturing.send(false)
+    }
 }
 
 extension ObscuraCamera: AVCapturePhotoCaptureDelegate {
-    nonisolated public func photoOutput(
+    public func photoOutput(
         _ output: AVCapturePhotoOutput,
         willCapturePhotoFor resolvedSettings: AVCaptureResolvedPhotoSettings
     ) {
-        Task {
-            guard await _isMuted.value else { return }
-            AudioServicesDisposeSystemSoundID(1108)
-        }
+        guard _isMuted.value else { return }
+        AudioServicesDisposeSystemSoundID(1108)
     }
     
-    nonisolated public func photoOutput(
+    public func photoOutput(
         _ output: AVCapturePhotoOutput,
         didCapturePhotoFor resolvedSettings: AVCaptureResolvedPhotoSettings
     ) {
-        Task {
-            guard await _isMuted.value else { return }
-            AudioServicesDisposeSystemSoundID(1108)
-        }
+        guard _isMuted.value else { return }
+        AudioServicesDisposeSystemSoundID(1108)
     }
     
-    nonisolated public func photoOutput(_ output: AVCapturePhotoOutput, didFinishProcessingPhoto photo: AVCapturePhoto, error: Error?) {
+    public func photoOutput(_ output: AVCapturePhotoOutput, didFinishProcessingPhoto photo: AVCapturePhoto, error: Error?) {
         if let error {
-            Task { await photoContinuation?.resume(throwing: error) }
+            photoContinuation?.resume(throwing: error)
             return
         }
 
         guard let fileData = photo.fileDataRepresentation() else {
-            Task { await photoContinuation?.resume(throwing: Errors.failedToCapture) }
+            photoContinuation?.resume(throwing: Errors.failedToCapture)
             return
         }
         
         do {
             let outputFileURL = imageDirectory.appending(path: UUID().uuidString + ".jpeg")
             try fileData.write(to: outputFileURL, options: [.atomic, .completeFileProtection])
-            Task { await photoContinuation?.resume(returning: outputFileURL.relativePath) }
+            photoContinuation?.resume(returning: outputFileURL.relativePath)
         } catch {
-            Task { await photoContinuation?.resume(throwing: error) }
+            photoContinuation?.resume(throwing: error)
         }
     }
     
-    nonisolated public func photoOutput(
+    public func photoOutput(
         _ output: AVCapturePhotoOutput,
         didFinishProcessingLivePhotoToMovieFileAt outputFileURL: URL,
         duration: CMTime,
@@ -562,25 +633,35 @@ extension ObscuraCamera: AVCapturePhotoCaptureDelegate {
         error: Error?
     ) {
         if let error {
-            Task { await videoContinuation?.resume(throwing: error) }
+            videoContinuation?.resume(throwing: error)
             return
         }
-        Task { await videoContinuation?.resume(returning: outputFileURL.relativePath) }
+        videoContinuation?.resume(returning: outputFileURL.relativePath)
     }
 }
 
 extension ObscuraCamera: AVCaptureFileOutputRecordingDelegate {
-    nonisolated public func fileOutput(
+    public func fileOutput(
         _ output: AVCaptureFileOutput,
         didFinishRecordingTo outputFileURL: URL,
         from connections: [AVCaptureConnection],
         error: (any Error)?
     ) {
         if let error = error {
-            Task { await videoContinuation?.resume(throwing: error) }
+            videoContinuation?.resume(throwing: error)
             return
         }
-        Task { await videoContinuation?.resume(returning: outputFileURL.relativePath) }
+        videoContinuation?.resume(returning: outputFileURL.relativePath)
+    }
+}
+
+extension ObscuraCamera: AVCaptureVideoDataOutputSampleBufferDelegate, AVCaptureAudioDataOutputSampleBufferDelegate {
+    public func captureOutput(_ output: AVCaptureOutput, didOutput sampleBuffer: CMSampleBuffer, from connection: AVCaptureConnection) {
+        if output is AVCaptureVideoDataOutput {
+            obscuraRecorder?.record(video: sampleBuffer)
+        } else if output is AVCaptureAudioDataOutput {
+            obscuraRecorder?.record(audio: sampleBuffer)
+        }
     }
 }
 
