@@ -1,5 +1,13 @@
 import ProjectDescription
 
+let releasedDependencies: [TargetDependency] = [
+    .external(name: "LightMeter"),
+]
+
+let devDependencies: [TargetDependency] = [
+    .project(target: "LightMeter", path: "../LightMeter"),
+]
+
 let targets: [Target] = [
     Target(
         name: "Obscura",
@@ -8,7 +16,7 @@ let targets: [Target] = [
         bundleId: "com.seunghun.obscura",
         deploymentTarget: .iOS(targetVersion: "16.0", devices: [.iphone]),
         sources: ["Obscura/Sources/**"],
-        dependencies: [],
+        dependencies: devDependencies,
         settings: .settings(
             base: ["SWIFT_STRICT_CONCURRENCY": "complete"]
         )

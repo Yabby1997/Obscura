@@ -8,9 +8,10 @@
 
 @preconcurrency import Combine
 import AVFoundation
+import LightMeter
 
 /// A class that wraps `AVCaptureDevice` and `AVCaptureSession` to provide a convenient interface for camera operations.
-public final class ObscuraCamera: NSObject {
+public final class ObscuraCamera: NSObject, Sendable {
     /// Errors that can occur while using ``ObscuraCamera``.
     public enum Errors: Error {
         /// Indicates that camera access is not authorized.
@@ -51,6 +52,8 @@ public final class ObscuraCamera: NSObject {
     private let _zoomFactor = CurrentValueSubject<CGFloat, Never>(1)
     private let _isCapturing = CurrentValueSubject<Bool, Never>(false)
     private let _isMuted = CurrentValueSubject<Bool, Never>(false)
+    private let _exposureOffset = CurrentValueSubject<Float, Never>(.zero)
+    private let _exposureValue = CurrentValueSubject<Float, Never>(.zero)
     
     private let imageDirectory = URL.homeDirectory.appending(path: "Documents/Obscura/Images")
     private let videoDirectory = URL.homeDirectory.appending(path: "Documents/Obscura/Videos")
@@ -88,6 +91,10 @@ public final class ObscuraCamera: NSObject {
     nonisolated public let isCapturing: AnyPublisher<Bool, Never>
     /// A `Bool` value indicating the camera is muted.
     nonisolated public let isMuted: AnyPublisher<Bool, Never>
+    /// A `Float` value representing the difference between the metered exposure level and the current exposure settings in stops.
+    nonisolated public let exposureOffset: AnyPublisher<Float, Never>
+    /// A `Float` value representing the metered exposure level in stops.
+    nonisolated public let exposureValue: AnyPublisher<Float, Never>
     
     private var photoContinuation: CheckedContinuation<String, Error>?
     private var videoContinuation: CheckedContinuation<String, Error>?
@@ -115,6 +122,8 @@ public final class ObscuraCamera: NSObject {
         self.zoomFactor = _zoomFactor.eraseToAnyPublisher()
         self.isCapturing = _isCapturing.eraseToAnyPublisher()
         self.isMuted = _isMuted.removeDuplicates().eraseToAnyPublisher()
+        self.exposureValue = _exposureValue.eraseToAnyPublisher()
+        self.exposureOffset = _exposureOffset.eraseToAnyPublisher()
         super.init()
     }
     
@@ -216,6 +225,19 @@ public final class ObscuraCamera: NSObject {
             .map(convert)
             .assign(to: \.value, on: _focusLockPoint)
             .store(in: &cancellables)
+        
+        camera.publisher(for: \.exposureTargetOffset)
+            .assign(to: \.value, on: _exposureOffset)
+            .store(in: &cancellables)
+        
+        Publishers.CombineLatest(
+            Publishers.CombineLatest3(iso, shutterSpeed, aperture).compactMap { try? LightMeterService.getExposureValue(iso: $0.0, shutterSpeed: $0.1, aperture: $0.2) },
+            exposureOffset
+        )
+        .map { $0 + $1 }
+        .receive(on: DispatchQueue.main)
+        .assign(to: \.value, on: _exposureValue)
+        .store(in: &cancellables)
         
         guard captureSession.canAddOutput(photoOutput) else { return }
         captureSession.addOutput(photoOutput)
@@ -319,7 +341,7 @@ public final class ObscuraCamera: NSObject {
     ///     - iso: The ISO value to lock exposure. Provide `nil` to leave it unchanged. Default value is `nil`.
     @ObscuraGlobalActor
     public func lockExposure(shutterSpeed: CMTime? = nil, iso: Float? = nil) async throws {
-        guard let camera else { return }
+        guard let camera else { throw Errors.setupRequired }
         try camera.lockForConfiguration()
         camera.exposureMode = .custom
         await withCheckedContinuation { continuation in
