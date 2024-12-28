@@ -52,8 +52,9 @@ public final class ObscuraCamera: NSObject, Sendable {
     private let _zoomFactor = CurrentValueSubject<CGFloat, Never>(1)
     private let _isCapturing = CurrentValueSubject<Bool, Never>(false)
     private let _isMuted = CurrentValueSubject<Bool, Never>(false)
-    private let _exposureOffset = CurrentValueSubject<Float, Never>(.zero)
     private let _exposureValue = CurrentValueSubject<Float, Never>(.zero)
+    private let _exposureOffset = CurrentValueSubject<Float, Never>(.zero)
+    private let _exposureBias = CurrentValueSubject<Float, Never>(.zero)
     
     private let imageDirectory = URL.homeDirectory.appending(path: "Documents/Obscura/Images")
     private let videoDirectory = URL.homeDirectory.appending(path: "Documents/Obscura/Videos")
@@ -91,10 +92,12 @@ public final class ObscuraCamera: NSObject, Sendable {
     nonisolated public let isCapturing: AnyPublisher<Bool, Never>
     /// A `Bool` value indicating the camera is muted.
     nonisolated public let isMuted: AnyPublisher<Bool, Never>
-    /// A `Float` value representing the difference between the metered exposure level and the current exposure settings in stops.
-    nonisolated public let exposureOffset: AnyPublisher<Float, Never>
     /// A `Float` value representing the metered exposure level in stops.
     nonisolated public let exposureValue: AnyPublisher<Float, Never>
+    /// A `Float` value representing the difference between the metered exposure level and the current exposure settings in stops.
+    nonisolated public let exposureOffset: AnyPublisher<Float, Never>
+    /// A `Float` value representing the currently applied exposure bias level in stops.
+    nonisolated public let exposureBias: AnyPublisher<Float, Never>
     
     private var photoContinuation: CheckedContinuation<String, Error>?
     private var videoContinuation: CheckedContinuation<String, Error>?
@@ -124,6 +127,7 @@ public final class ObscuraCamera: NSObject, Sendable {
         self.isMuted = _isMuted.removeDuplicates().eraseToAnyPublisher()
         self.exposureValue = _exposureValue.eraseToAnyPublisher()
         self.exposureOffset = _exposureOffset.eraseToAnyPublisher()
+        self.exposureBias = _exposureBias.eraseToAnyPublisher()
         super.init()
     }
     
@@ -230,6 +234,10 @@ public final class ObscuraCamera: NSObject, Sendable {
             .assign(to: \.value, on: _exposureOffset)
             .store(in: &cancellables)
         
+        camera.publisher(for: \.exposureTargetBias)
+            .assign(to: \.value, on: _exposureBias)
+            .store(in: &cancellables)
+        
         Publishers.CombineLatest(
             Publishers.CombineLatest3(iso, shutterSpeed, aperture).compactMap { try? LightMeterService.getExposureValue(iso: $0.0, shutterSpeed: $0.1, aperture: $0.2) },
             exposureOffset
@@ -313,6 +321,18 @@ public final class ObscuraCamera: NSObject, Sendable {
     ///     - isMuted: The mute state to be set.
     public func setMute(_ isMuted: Bool) {
         _isMuted.send(isMuted)
+    }
+    
+    /// Sets the exposure bias level.
+    ///
+    /// - Parameters:
+    ///   - bias: The exposure bias in stops.
+    @ObscuraGlobalActor
+    public func setExposure(bias: Float) async throws {
+        guard let camera else { throw Errors.setupRequired }
+        try camera.lockForConfiguration()
+        await camera.setExposureTargetBias(bias)
+        camera.unlockForConfiguration()
     }
     
     /// Locks the exposure on certain point.
