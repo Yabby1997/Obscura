@@ -325,11 +325,15 @@ public final class ObscuraCamera: NSObject, Sendable {
     ///
     /// - Parameters:
     ///     - factor: The zoom factor.
-    @ObscuraGlobalActor
-    public func zoom(factor: CGFloat) async throws {
+    ///     - animated: Pass `false` to zoom without animation. Default value is `true`.
+    public func zoom(factor: CGFloat, animated: Bool = true) throws {
         guard let camera else { throw Errors.setupRequired }
         try camera.lockForConfiguration()
-        camera.ramp(toVideoZoomFactor: max(_minZoomFactor.value, min(factor, _maxZoomFactor.value)), withRate: 30)
+        if animated {
+            camera.ramp(toVideoZoomFactor: max(_minZoomFactor.value, min(factor, _maxZoomFactor.value)), withRate: 30)
+        } else {
+            camera.videoZoomFactor = max(_minZoomFactor.value, min(factor, _maxZoomFactor.value))
+        }
         camera.unlockForConfiguration()
     }
     
