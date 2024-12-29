@@ -26,7 +26,9 @@ public final class ObscuraCamera: NSObject, Sendable {
     
     // MARK: - Dependencies
     
-    private var camera: AVCaptureDevice?
+    private var camera: AVCaptureDevice? { willSet { bind(camera: newValue) } }
+    private var cameraInput: AVCaptureDeviceInput?
+    private var micInput: AVCaptureDeviceInput?
     private let captureSession = AVCaptureSession()
     private let photoOutput =  AVCapturePhotoOutput()
     private var recordOutput: AVCaptureMovieFileOutput?
@@ -39,6 +41,7 @@ public final class ObscuraCamera: NSObject, Sendable {
     
     private var _previewLayer: AVCaptureVideoPreviewLayer { previewLayer as! AVCaptureVideoPreviewLayer }
     private let _isRunning = CurrentValueSubject<Bool, Never>(false)
+    private let _isFrontFacing = CurrentValueSubject<Bool, Never>(false)
     private let _minZoomFactor = CurrentValueSubject<CGFloat, Never>(.zero)
     private let _maxZoomFactor = CurrentValueSubject<CGFloat, Never>(.infinity)
     private let _isHDREnabled = CurrentValueSubject<Bool, Never>(false)
@@ -66,6 +69,8 @@ public final class ObscuraCamera: NSObject, Sendable {
     
     /// A `Bool` value indicating whether the camera is running.
     nonisolated public let isRunning: AnyPublisher<Bool, Never>
+    /// A `Bool` value that indicates whether the front-facing camera is currently in use.
+    nonisolated public let isFrontFacing: AnyPublisher<Bool, Never>
     /// A `CGFloat` value indicating the mimimum zoom factor.
     nonisolated public let minZoomFactor: AnyPublisher<CGFloat, Never>
     /// A `CGFloat` value indicating the maximum zoom factor.
@@ -101,8 +106,8 @@ public final class ObscuraCamera: NSObject, Sendable {
     
     private var photoContinuation: CheckedContinuation<String, Error>?
     private var videoContinuation: CheckedContinuation<String, Error>?
-    private var zoomTask: Task<Void, Error>?
     private var cancellables: Set<AnyCancellable> = []
+    private var cameraSpecificCancellables: Set<AnyCancellable> = []
     
     // MARK: - Initializers
     
@@ -112,6 +117,7 @@ public final class ObscuraCamera: NSObject, Sendable {
     public override init() {
         self.previewLayer = AVCaptureVideoPreviewLayer(session: captureSession)
         self.isRunning = _isRunning.eraseToAnyPublisher()
+        self.isFrontFacing = _isFrontFacing.eraseToAnyPublisher()
         self.minZoomFactor = _minZoomFactor.eraseToAnyPublisher()
         self.maxZoomFactor = _maxZoomFactor.eraseToAnyPublisher()
         self.isHDREnabled = _isHDREnabled.eraseToAnyPublisher()
@@ -129,9 +135,94 @@ public final class ObscuraCamera: NSObject, Sendable {
         self.exposureOffset = _exposureOffset.eraseToAnyPublisher()
         self.exposureBias = _exposureBias.eraseToAnyPublisher()
         super.init()
+        bind()
     }
     
     // MARK: - Private methods
+    
+    private func bind() {
+        captureSession.publisher(for: \.isRunning)
+            .assign(to: \.value, on: _isRunning)
+            .store(in: &cancellables)
+        
+        Publishers.CombineLatest(
+            Publishers.CombineLatest3(iso, shutterSpeed, aperture).compactMap { try? LightMeterService.getExposureValue(iso: $0.0, shutterSpeed: $0.1, aperture: $0.2) },
+            exposureOffset
+        )
+        .map { $0 + $1 }
+        .assign(to: \.value, on: _exposureValue)
+        .store(in: &cancellables)
+    }
+    
+    private func bind(camera: AVCaptureDevice?) {
+        cameraSpecificCancellables = []
+        
+        guard let camera else { return }
+        
+        camera.publisher(for: \.isVideoHDREnabled)
+            .assign(to: \.value, on: _isHDREnabled)
+            .store(in: &cameraSpecificCancellables)
+        
+        camera.publisher(for: \.minAvailableVideoZoomFactor)
+            .assign(to: \.value, on: _minZoomFactor)
+            .store(in: &cameraSpecificCancellables)
+        
+        camera.publisher(for: \.maxAvailableVideoZoomFactor)
+            .assign(to: \.value, on: _maxZoomFactor)
+            .store(in: &cameraSpecificCancellables)
+        
+        camera.publisher(for: \.videoZoomFactor)
+            .assign(to: \.value, on: _zoomFactor)
+            .store(in: &cameraSpecificCancellables)
+        
+        camera.publisher(for: \.iso)
+            .assign(to: \.value, on: _iso)
+            .store(in: &cameraSpecificCancellables)
+        
+        camera.publisher(for: \.exposureDuration)
+            .map { Float($0.seconds) }
+            .assign(to: \.value, on: _shutterSpeed)
+            .store(in: &cameraSpecificCancellables)
+        
+        camera.publisher(for: \.lensAperture)
+            .assign(to: \.value, on: _aperture)
+            .store(in: &cameraSpecificCancellables)
+        
+        camera.publisher(for: \.exposureMode)
+            .map { $0 == .locked || $0 == .custom }
+            .assign(to: \.value, on: _isExposureLocked)
+            .store(in: &cameraSpecificCancellables)
+        
+        camera.publisher(for: \.focusMode)
+            .map { $0 == .locked }
+            .assign(to: \.value, on: _isFocusLocked)
+            .store(in: &cameraSpecificCancellables)
+        
+        camera.publisher(for: \.exposurePointOfInterest)
+            .dropFirst()
+            .map(convert)
+            .assign(to: \.value, on: _exposureLockPoint)
+            .store(in: &cameraSpecificCancellables)
+        
+        camera.publisher(for: \.focusPointOfInterest)
+            .dropFirst()
+            .map(convert)
+            .assign(to: \.value, on: _focusLockPoint)
+            .store(in: &cameraSpecificCancellables)
+        
+        camera.publisher(for: \.exposureTargetOffset)
+            .assign(to: \.value, on: _exposureOffset)
+            .store(in: &cameraSpecificCancellables)
+        
+        camera.publisher(for: \.exposureTargetBias)
+            .assign(to: \.value, on: _exposureBias)
+            .store(in: &cameraSpecificCancellables)
+        
+        camera.publisher(for: \.position)
+            .map { $0 == .front }
+            .assign(to: \.value, on: _isFrontFacing)
+            .store(in: &cameraSpecificCancellables)
+    }
     
     private func createDirectoryIfNeeded(for path: String) throws {
         if FileManager.default.fileExists(atPath: path) {
@@ -144,6 +235,18 @@ public final class ObscuraCamera: NSObject, Sendable {
             attributes: nil
         )
         print("Directory Created: \(path)")
+    }
+    
+    private func setupCamera(deviceType: AVCaptureDevice.DeviceType = .builtInWideAngleCamera, position: AVCaptureDevice.Position) throws {
+        guard let newCamera = AVCaptureDevice.default(deviceType, for: .video, position: position) else { throw Errors.notSupported }
+        let newCameraInput = try AVCaptureDeviceInput(device: newCamera)
+        captureSession.beginConfiguration()
+        if let cameraInput { captureSession.removeInput(cameraInput) }
+        guard captureSession.canAddInput(newCameraInput) else { throw Errors.notSupported }
+        captureSession.addInput(newCameraInput)
+        captureSession.commitConfiguration()
+        self.camera = newCamera
+        self.cameraInput = newCameraInput
     }
     
     private func convert(point: CGPoint) -> CGPoint {
@@ -164,88 +267,9 @@ public final class ObscuraCamera: NSObject, Sendable {
     public func setup() async throws {
         try createDirectoryIfNeeded(for: imageDirectory.path)
         try createDirectoryIfNeeded(for: videoDirectory.path)
-
-        guard await AVCaptureDevice.requestAccess(for: .video) else {
-            throw Errors.notAuthorized
-        }
         
-        guard let camera = AVCaptureDevice.default(for: .video) else { return }
-        let cameraInput = try AVCaptureDeviceInput(device: camera)
-        guard captureSession.canAddInput(cameraInput) else { return }
-        captureSession.addInput(cameraInput)
-        self.camera = camera
-        
-        captureSession.publisher(for: \.isRunning)
-            .assign(to: \.value, on: _isRunning)
-            .store(in: &cancellables)
-        
-        camera.publisher(for: \.isVideoHDREnabled)
-            .assign(to: \.value, on: _isHDREnabled)
-            .store(in: &cancellables)
-        
-        camera.publisher(for: \.minAvailableVideoZoomFactor)
-            .assign(to: \.value, on: _minZoomFactor)
-            .store(in: &cancellables)
-        
-        camera.publisher(for: \.maxAvailableVideoZoomFactor)
-            .assign(to: \.value, on: _maxZoomFactor)
-            .store(in: &cancellables)
-        
-        camera.publisher(for: \.videoZoomFactor)
-            .assign(to: \.value, on: _zoomFactor)
-            .store(in: &cancellables)
-        
-        camera.publisher(for: \.iso)
-            .assign(to: \.value, on: _iso)
-            .store(in: &cancellables)
-        
-        camera.publisher(for: \.exposureDuration)
-            .map { Float($0.seconds) }
-            .assign(to: \.value, on: _shutterSpeed)
-            .store(in: &cancellables)
-        
-        camera.publisher(for: \.lensAperture)
-            .assign(to: \.value, on: _aperture)
-            .store(in: &cancellables)
-        
-        camera.publisher(for: \.exposureMode)
-            .map { $0 == .locked || $0 == .custom }
-            .assign(to: \.value, on: _isExposureLocked)
-            .store(in: &cancellables)
-        
-        camera.publisher(for: \.focusMode)
-            .map { $0 == .locked }
-            .assign(to: \.value, on: _isFocusLocked)
-            .store(in: &cancellables)
-        
-        camera.publisher(for: \.exposurePointOfInterest)
-            .dropFirst()
-            .map(convert)
-            .assign(to: \.value, on: _exposureLockPoint)
-            .store(in: &cancellables)
-        
-        camera.publisher(for: \.focusPointOfInterest)
-            .dropFirst()
-            .map(convert)
-            .assign(to: \.value, on: _focusLockPoint)
-            .store(in: &cancellables)
-        
-        camera.publisher(for: \.exposureTargetOffset)
-            .assign(to: \.value, on: _exposureOffset)
-            .store(in: &cancellables)
-        
-        camera.publisher(for: \.exposureTargetBias)
-            .assign(to: \.value, on: _exposureBias)
-            .store(in: &cancellables)
-        
-        Publishers.CombineLatest(
-            Publishers.CombineLatest3(iso, shutterSpeed, aperture).compactMap { try? LightMeterService.getExposureValue(iso: $0.0, shutterSpeed: $0.1, aperture: $0.2) },
-            exposureOffset
-        )
-        .map { $0 + $1 }
-        .receive(on: DispatchQueue.main)
-        .assign(to: \.value, on: _exposureValue)
-        .store(in: &cancellables)
+        guard await AVCaptureDevice.requestAccess(for: .video) else { throw Errors.notAuthorized }
+        try setupCamera(position: .back)
         
         guard captureSession.canAddOutput(photoOutput) else { return }
         captureSession.addOutput(photoOutput)
@@ -273,6 +297,15 @@ public final class ObscuraCamera: NSObject, Sendable {
         guard await AVCaptureDevice.requestAccess(for: .audio) else {
             throw Errors.notAuthorized
         }
+    }
+    
+    /// Switches the camera's position between front and back.
+    ///
+    /// - Important: Switching the camera will reset and unlock focus and exposure settings.
+    public func switchCamera() throws {
+        try? unlockFocus()
+        try? unlockExposure()
+        try setupCamera(position: _isFrontFacing.value ? .back : .front)
     }
     
     /// Starts camera session.
@@ -473,6 +506,7 @@ public final class ObscuraCamera: NSObject, Sendable {
            let micInput = try? AVCaptureDeviceInput(device: mic),
            captureSession.canAddInput(micInput) {
             captureSession.addInput(micInput)
+            self.micInput = micInput
         }
 
         photoOutput.capturePhoto(with: photoSetting, delegate: self)
@@ -481,14 +515,16 @@ public final class ObscuraCamera: NSObject, Sendable {
             do {
                 let imagePath = try await withCheckedThrowingContinuation { photoContinuation = $0 }
                 let videoPath = try await withCheckedThrowingContinuation { videoContinuation = $0 }
-                if let micInput = (captureSession.inputs.first { $0.ports.contains { $0.sourceDeviceType == .builtInMicrophone } }) {
+                if let micInput {
                     captureSession.removeInput(micInput)
+                    self.micInput = nil
                 }
                 _isCapturing.send(false)
                 return ObscuraCaptureResult(imagePath: imagePath, videoPath: videoPath)
             } catch {
-                if let micInput = (captureSession.inputs.first { $0.ports.contains { $0.sourceDeviceType == .builtInMicrophone } }) {
+                if let micInput {
                     captureSession.removeInput(micInput)
+                    self.micInput = nil
                 }
                 _isCapturing.send(false)
                 throw error
@@ -538,6 +574,7 @@ public final class ObscuraCamera: NSObject, Sendable {
            let micInput = try? AVCaptureDeviceInput(device: mic),
            captureSession.canAddInput(micInput) {
             captureSession.addInput(micInput)
+            self.micInput = micInput
         }
         
         let recordOutput = AVCaptureMovieFileOutput()
@@ -562,8 +599,9 @@ public final class ObscuraCamera: NSObject, Sendable {
         recordOutput.stopRecording()
         let videoPath = try await withCheckedThrowingContinuation { videoContinuation = $0 }
         captureSession.removeOutput(recordOutput)
-        if let micInput = (captureSession.inputs.first { $0.ports.contains { $0.sourceDeviceType == .builtInMicrophone } }) {
+        if let micInput {
             captureSession.removeInput(micInput)
+            self.micInput = nil
         }
         _isCapturing.send(false)
         return ObscuraCaptureResult(imagePath: nil, videoPath: videoPath)
@@ -584,6 +622,7 @@ public final class ObscuraCamera: NSObject, Sendable {
            let micInput = try? AVCaptureDeviceInput(device: mic),
            captureSession.canAddInput(micInput) {
             captureSession.addInput(micInput)
+            self.micInput = micInput
         }
         
         let videoDataOutput = AVCaptureVideoDataOutput()
@@ -618,8 +657,9 @@ public final class ObscuraCamera: NSObject, Sendable {
         captureSession.removeOutput(videoDataOutput)
         captureSession.removeOutput(audioDataOutput)
         
-        if let micInput = (captureSession.inputs.first { $0.ports.contains { $0.sourceDeviceType == .builtInMicrophone } }) {
+        if let micInput {
             captureSession.removeInput(micInput)
+            self.micInput = nil
         }
         
         self.obscuraRecorder = nil
