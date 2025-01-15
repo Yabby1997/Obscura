@@ -393,7 +393,7 @@ public final class ObscuraCamera: NSObject, Sendable {
     ///
     /// - Note: Unlock the exposure using ``unlockExposure()``
     ///
-    /// - Paramters:
+    /// - Parameters:
     ///     - shutterSpeed: The shutter speed to lock exposure. Provide `nil` to leave it unchaged. Default value is `nil`.
     ///     - iso: The ISO value to lock exposure. Provide `nil` to leave it unchanged. Default value is `nil`.
     @ObscuraGlobalActor
@@ -571,9 +571,12 @@ public final class ObscuraCamera: NSObject, Sendable {
     /// Call this method to start recording a video with ``ObscuraCamera``.
     /// To stop, call ``stopRecord()``.
     ///
+    /// - Parameters:
+    ///     - allowHapticsAndSystemSounds: A Boolean value that indicates whether haptics and system sounds should play while recording is in progress. Default value is `false`.
+    ///
     /// - Note: If microphone usage authorization is not granted, the captured video won't have audio. Call ``requestMicAuthorization()`` to request access.
     /// - Throws: Errors that might occur starting video record.
-    public func startRecordVideo() throws {
+    public func startRecordVideo(allowHapticsAndSystemSounds: Bool = false) throws {
         if let mic = AVCaptureDevice.default(for: .audio),
            let micInput = try? AVCaptureDeviceInput(device: mic),
            captureSession.canAddInput(micInput) {
@@ -586,6 +589,7 @@ public final class ObscuraCamera: NSObject, Sendable {
         captureSession.addOutput(recordOutput)
 
         _isCapturing.send(true)
+        try AVAudioSession.sharedInstance().setAllowHapticsAndSystemSoundsDuringRecording(allowHapticsAndSystemSounds)
         recordOutput.startRecording(to: videoDirectory.appending(path: UUID().uuidString + ".mov"), recordingDelegate: self)
         self.recordOutput = recordOutput
     }
@@ -619,9 +623,10 @@ public final class ObscuraCamera: NSObject, Sendable {
     /// - Note: If microphone usage authorization is not granted, the captured video won't have audio. Call ``requestMicAuthorization()`` to request access.
     /// - Parameters:
     ///     - obscuraRecorder: A custom implementation of ``ObscuraRecordable`` that defines how video and audio will be recorded.
+    ///     - allowHapticsAndSystemSounds: A Boolean value that indicates whether haptics and system sounds should play while recording is in progress. Default value is `false`.
     /// - Throws: Errors that might occur starting video record.
     @ObscuraGlobalActor
-    public func start(obscuraRecorder: ObscuraRecordable) async throws {
+    public func start(obscuraRecorder: ObscuraRecordable, allowHapticsAndSystemSounds: Bool = false) async throws {
         if let mic = AVCaptureDevice.default(for: .audio),
            let micInput = try? AVCaptureDeviceInput(device: mic),
            captureSession.canAddInput(micInput) {
@@ -645,6 +650,7 @@ public final class ObscuraCamera: NSObject, Sendable {
         
         await obscuraRecorder.prepareForStart()
         _isCapturing.send(true)
+        try AVAudioSession.sharedInstance().setAllowHapticsAndSystemSoundsDuringRecording(allowHapticsAndSystemSounds)
     }
     
     /// Stops video recording with custom recorder.
