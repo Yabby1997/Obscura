@@ -24,6 +24,32 @@ public final class ObscuraCamera: NSObject, Sendable {
         case failedToCapture
     }
     
+    /// An enum value that specifies how the result of ``ObscuraCamera`` should be rotated.
+    public enum Orientation {
+        case portrait
+        case portraitUpsideDown
+        case landscapeRight
+        case landscapeLeft
+        
+        fileprivate var videoOrientation: AVCaptureVideoOrientation {
+            switch self {
+            case .portrait: return .portrait
+            case .portraitUpsideDown: return .portraitUpsideDown
+            case .landscapeLeft: return .landscapeLeft
+            case .landscapeRight: return .landscapeRight
+            }
+        }
+        
+        fileprivate var rotationAngle: CGFloat {
+            switch self {
+            case .portrait: return 90
+            case .portraitUpsideDown: return 270
+            case .landscapeRight: return .zero
+            case .landscapeLeft: return 180
+            }
+        }
+    }
+    
     // MARK: - Dependencies
     
     private var camera: AVCaptureDevice? { willSet { bind(camera: newValue) } }
@@ -273,7 +299,6 @@ public final class ObscuraCamera: NSObject, Sendable {
         
         guard captureSession.canAddOutput(photoOutput) else { return }
         captureSession.addOutput(photoOutput)
-        photoOutput.connection(with: .video)?.videoOrientation = .portrait
         photoOutput.isLivePhotoCaptureEnabled = photoOutput.isLivePhotoCaptureSupported
         
         guard captureSession.canSetSessionPreset(.photo) else { return }
@@ -488,13 +513,16 @@ public final class ObscuraCamera: NSObject, Sendable {
     ///
     /// Call this method to capture a LivePhoto with ``ObscuraCamera``.
     ///
+    /// - Parameters:
+    ///     - orientation: An ``Orientation`` indicates how the result should be rotated.
+    ///
     /// - Important: Returns `nil` if the camera is currently busy with a previous capture request.
     /// - Note: If microphone usage authorization is not granted, the captured LivePhoto won't have audio.
     /// - SeeAlso: ``requestMicAuthorization()``
     /// - Returns: An ``ObscuraCaptureResult`` containing image and video URLs that can be combined into a LivePhoto in the app sandbox.
     /// - Throws: Errors that might occur while capturing LivePhoto.
     @ObscuraGlobalActor
-    public func captureLivePhoto() async throws -> ObscuraCaptureResult? {
+    public func captureLivePhoto(orientation: Orientation = .portrait) async throws -> ObscuraCaptureResult? {
         guard !_isCapturing.value else { return nil }
         
         let photoSetting = AVCapturePhotoSettings(
@@ -512,7 +540,15 @@ public final class ObscuraCamera: NSObject, Sendable {
             captureSession.addInput(micInput)
             self.micInput = micInput
         }
-
+        
+        if #available(iOS 17.0, *) {
+            if photoOutput.connection(with: .video)?.isVideoRotationAngleSupported(orientation.rotationAngle) == true {
+                photoOutput.connection(with: .video)?.videoRotationAngle = orientation.rotationAngle
+            }
+        } else {
+            photoOutput.connection(with: .video)?.videoOrientation = orientation.videoOrientation
+        }
+        
         photoOutput.capturePhoto(with: photoSetting, delegate: self)
         return try await Task {
             _isCapturing.send(true)
@@ -541,16 +577,27 @@ public final class ObscuraCamera: NSObject, Sendable {
     ///
     /// Call this method to capture a still photo with ``ObscuraCamera``.
     ///
+    /// - Parameters:
+    ///     - orientation: An ``Orientation`` indicates how the result should be rotated.
+    ///
     /// - Important: Returns `nil` if the camera is currently busy with a previous capture request.
     /// - Returns: An ``ObscuraCaptureResult`` containing the image URL in the app sandbox.
     /// - Throws: Errors that might occur while capturing the photo.
     @ObscuraGlobalActor
-    public func capturePhoto() async throws -> ObscuraCaptureResult? {
+    public func capturePhoto(orientation: Orientation = .portrait) async throws -> ObscuraCaptureResult? {
         guard !_isCapturing.value else { return nil }
         
         let photoSetting = AVCapturePhotoSettings(format:  [AVVideoCodecKey: AVVideoCodecType.hevc])
         photoSetting.photoQualityPrioritization = photoOutput.maxPhotoQualityPrioritization
-
+        
+        if #available(iOS 17.0, *) {
+            if photoOutput.connection(with: .video)?.isVideoRotationAngleSupported(orientation.rotationAngle) == true {
+                photoOutput.connection(with: .video)?.videoRotationAngle = orientation.rotationAngle
+            }
+        } else {
+            photoOutput.connection(with: .video)?.videoOrientation = orientation.videoOrientation
+        }
+        
         photoOutput.capturePhoto(with: photoSetting, delegate: self)
         return try await Task {
             _isCapturing.send(true)
@@ -572,11 +619,12 @@ public final class ObscuraCamera: NSObject, Sendable {
     /// To stop, call ``stopRecord()``.
     ///
     /// - Parameters:
+    ///     - orientation: An ``Orientation`` indicates how the result should be rotated.
     ///     - allowHapticsAndSystemSounds: A Boolean value that indicates whether haptics and system sounds should play while recording is in progress. Default value is `false`.
     ///
     /// - Note: If microphone usage authorization is not granted, the captured video won't have audio. Call ``requestMicAuthorization()`` to request access.
     /// - Throws: Errors that might occur starting video record.
-    public func startRecordVideo(allowHapticsAndSystemSounds: Bool = false) throws {
+    public func startRecordVideo(orientation: Orientation = .portrait, allowHapticsAndSystemSounds: Bool = false) throws {
         if let mic = AVCaptureDevice.default(for: .audio),
            let micInput = try? AVCaptureDeviceInput(device: mic),
            captureSession.canAddInput(micInput) {
@@ -587,6 +635,14 @@ public final class ObscuraCamera: NSObject, Sendable {
         let recordOutput = AVCaptureMovieFileOutput()
         guard captureSession.canAddOutput(recordOutput) else { throw Errors.notSupported }
         captureSession.addOutput(recordOutput)
+        
+        if #available(iOS 17.0, *) {
+            if recordOutput.connection(with: .video)?.isVideoRotationAngleSupported(orientation.rotationAngle) == true {
+                recordOutput.connection(with: .video)?.videoRotationAngle = orientation.rotationAngle
+            }
+        } else {
+            recordOutput.connection(with: .video)?.videoOrientation = orientation.videoOrientation
+        }
 
         _isCapturing.send(true)
         try AVAudioSession.sharedInstance().setAllowHapticsAndSystemSoundsDuringRecording(allowHapticsAndSystemSounds)
