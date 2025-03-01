@@ -449,6 +449,20 @@ public final class ObscuraCamera: NSObject, Sendable {
         _exposureLockPoint.send(nil)
     }
     
+    /// Adjusts the focus on certain point once and let it be adjusted if needed.
+    ///
+    /// - Parameters:
+    ///     - point: The certain point on `previewLayer` to lock focus.
+    public func adjustFocus(on point: CGPoint) throws {
+        guard let camera else { throw Errors.setupRequired }
+        guard camera.isFocusPointOfInterestSupported else { throw Errors.notSupported }
+        try camera.lockForConfiguration()
+        let pointOfInterest = _previewLayer.captureDevicePointConverted(fromLayerPoint: point)
+        camera.focusPointOfInterest = pointOfInterest
+        camera.focusMode = .continuousAutoFocus
+        camera.unlockForConfiguration()
+    }
+    
     /// Locks the focus on certain point.
     ///
     /// - Note: Unlock the focus using ``unlockFocus()``
@@ -458,7 +472,6 @@ public final class ObscuraCamera: NSObject, Sendable {
     public func lockFocus(on point: CGPoint) throws {
         guard let camera else { throw Errors.setupRequired }
         guard camera.isFocusPointOfInterestSupported else { throw Errors.notSupported }
-        _focusLockPoint.send(nil)
         try camera.lockForConfiguration()
         let pointOfInterest = _previewLayer.captureDevicePointConverted(fromLayerPoint: point)
         camera.focusPointOfInterest = pointOfInterest
@@ -475,7 +488,6 @@ public final class ObscuraCamera: NSObject, Sendable {
         camera.focusPointOfInterest = pointOfInterest
         camera.focusMode = .continuousAutoFocus
         camera.unlockForConfiguration()
-        _focusLockPoint.send(nil)
     }
     
     /// Locks the frame rate.
