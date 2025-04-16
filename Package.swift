@@ -14,9 +14,15 @@ let package = Package(
             targets: ["Obscura"]
         ),
     ],
+    dependencies: [
+        .package(url: "https://github.com/Yabby1997/LightMeter", from: "0.2.0")
+    ],
     targets: [
         .target(
             name: "Obscura",
+            dependencies: [
+                .product(name: "LightMeter", package: "LightMeter")
+            ],
             path: "Obscura"
         )
     ]
